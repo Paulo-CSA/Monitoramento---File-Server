@@ -1,0 +1,6 @@
+{
+  "name": "Zabbix Storage Sentinel",
+  "description": "Professional dashboard for monitoring file server health, disk space, deduplication, and system resources via Zabbix API.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
