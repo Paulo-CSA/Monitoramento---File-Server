@@ -9,7 +9,9 @@ import {
   RefreshCcw, 
   ShieldCheck,
   TrendingDown,
-  Info
+  Info,
+  Trash2,
+  X
 } from 'lucide-react';
 import {
   AreaChart,
@@ -109,10 +111,11 @@ export default function ZabbixDashboard() {
       const itemsData = await apiFetch('item.get', { 
         hostids: host.hostid, 
         output: ['itemid', 'name', 'lastvalue', 'units', 'key_', 'value_type'],
-        search: { key_: ['vfs.fs', 'system.cpu', 'vm.memory', 'dedup'] },
+        search: { key_: ['vfs.fs', 'system.cpu', 'vm.memory', 'dedup', 'storage'] },
         searchByAny: true
       });
       
+      const fetchedItems = itemsData.result || [];
       processMetrics(fetchedItems);
       setError(null);
     } catch (err: any) {
@@ -146,30 +149,49 @@ export default function ZabbixDashboard() {
     setActiveServerId(server.id);
   };
 
+  const handleDeleteServer = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (servers.length <= 1) {
+      // Prevent deleting last server if you want, but user asked to delete even demo
+      // We can just keep an empty list or show a message
+    }
+    const updated = servers.filter(s => s.id !== id);
+    setServers(updated);
+    if (activeServerId === id && updated.length > 0) {
+      setActiveServerId(updated[0].id);
+    }
+  };
+
   const processMetrics = (fetchedItems: ZabbixItem[]) => {
     const findValue = (regex: RegExp) => {
       const item = fetchedItems.find((i: ZabbixItem) => regex.test(i.key_) || regex.test(i.name.toLowerCase()));
       return item ? parseFloat(item.lastvalue) : 0;
     };
 
-    const diskTotal = findValue(/vfs.fs.size\[.*,total\]/);
-    const diskUsed = findValue(/vfs.fs.size\[.*,used\]/);
-    const diskFree = findValue(/vfs.fs.size\[.*,free\]/);
-    const cpuLoad = findValue(/system.cpu.load\[.*,avg1\]/) || findValue(/system.cpu.util/);
-    const memTotal = findValue(/vm.memory.size\[total\]/);
-    const memAvailable = findValue(/vm.memory.size\[available\]/);
-    const dedupRatio = findValue(/dedup.ratio/) || 1.2;
+    // Improved item search for Linux/Windows/Storage templates
+    const diskTotal = findValue(/vfs.fs.size\[.*,total\]/) || findValue(/total space/) || findValue(/vfs.fs.total/) || findValue(/storage.capacity/);
+    const diskUsed = findValue(/vfs.fs.size\[.*,used\]/) || findValue(/used space/) || findValue(/vfs.fs.used/) || findValue(/storage.used/);
+    const diskFree = findValue(/vfs.fs.size\[.*,free\]/) || findValue(/free space/) || findValue(/vfs.fs.free/) || findValue(/storage.free/);
+    const cpuLoad = findValue(/system.cpu.load\[.*,avg1\]/) || findValue(/system.cpu.util/) || findValue(/cpu utilization/) || findValue(/cpu.load/);
+    const memTotal = findValue(/vm.memory.size\[total\]/) || findValue(/total memory/) || findValue(/mem.total/);
+    const memAvailable = findValue(/vm.memory.size\[available\]/) || findValue(/available memory/) || findValue(/mem.available/);
+    const dedupRatio = findValue(/dedup.ratio/) || searchDedup(fetchedItems) || 1.2;
 
     const currentMetrics = {
-      cpu: Math.round(Math.min(cpuLoad, 100)) || 5,
-      ram: Math.round(((memTotal - memAvailable) / memTotal) * 100) || 45,
-      diskUsed: Math.round((diskUsed / diskTotal) * 100) || 60,
-      diskFree: Math.round((diskFree / 1024 / 1024 / 1024) * 100) / 100 || 250,
+      cpu: Math.round(Math.min(cpuLoad, 100)) || 0,
+      ram: memTotal > 0 ? Math.round(((memTotal - memAvailable) / memTotal) * 100) : 0,
+      diskUsed: diskTotal > 0 ? Math.round((diskUsed / diskTotal) * 100) : 0,
+      diskFree: Math.round((diskFree / 1024 / 1024 / 1024) * 100) / 100 || 0,
       dedup: dedupRatio
     };
 
     setMetrics(currentMetrics);
     fetchAiInsight(currentMetrics);
+  };
+
+  const searchDedup = (items: ZabbixItem[]) => {
+    const item = items.find(i => /dedup/i.test(i.name) || /dedup/i.test(i.key_));
+    return item ? parseFloat(item.lastvalue) : null;
   };
 
   const loadDemoData = () => {
@@ -257,19 +279,32 @@ export default function ZabbixDashboard() {
             </div>
             <div className="space-y-1">
               {servers.map(server => (
-                <button 
-                  key={server.id}
-                  onClick={() => setActiveServerId(server.id)}
-                  className={`w-full text-left px-3 py-2 rounded-md transition-all ${
-                    activeServerId === server.id 
-                    ? 'bg-blue-600/10 text-blue-400 border border-blue-600/20' 
-                    : 'text-slate-400 hover:bg-slate-800'
-                  }`}
-                >
-                  <div className="text-sm font-medium truncate">{server.name}</div>
-                  <div className="text-[9px] opacity-60 font-mono">{server.zabbixHostname}</div>
-                </button>
+                <div key={server.id} className="group relative">
+                  <button 
+                    onClick={() => setActiveServerId(server.id)}
+                    className={`w-full text-left px-3 py-2 rounded-md transition-all pr-8 ${
+                      activeServerId === server.id 
+                      ? 'bg-blue-600/10 text-blue-400 border border-blue-600/20' 
+                      : 'text-slate-400 hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="text-sm font-medium truncate">{server.name}</div>
+                    <div className="text-[9px] opacity-60 font-mono">{server.zabbixHostname}</div>
+                  </button>
+                  <button 
+                    onClick={(e) => handleDeleteServer(server.id, e)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-600 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"
+                    title="Excluir Servidor"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
               ))}
+              {servers.length === 0 && (
+                <div className="text-center py-4 px-2 border border-dashed border-slate-800 rounded bg-slate-950/50">
+                  <p className="text-[10px] text-slate-600 uppercase">Nenhum servidor cadastrado</p>
+                </div>
+              )}
             </div>
           </div>
         </nav>
@@ -277,9 +312,9 @@ export default function ZabbixDashboard() {
         {error === 'NETWORK_INTERNAL' && (
           <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded text-[10px] text-amber-200">
             <div className="flex items-center gap-1.5 font-bold mb-1 uppercase tracking-tighter">
-              <AlertTriangle className="w-3 h-3 text-amber-500" /> Rede Interna
+              <AlertTriangle className="w-3 h-3 text-amber-500" /> Falha de Conexão
             </div>
-            O servidor está inacessível da nuvem. Exibindo dados simulados (Modo Demo).
+            Não foi possível alcançar o Zabbix a partir deste servidor. Exibindo dados de simulação (Demo).
           </div>
         )}
 
