@@ -44,14 +44,12 @@ export default function ZabbixDashboard() {
   const [config, setConfig] = useState<any>(null);
 
   // Server Management State
-  const [servers, setServers] = useState<FileServer[]>([
-    { id: '1', name: 'Produção Central', zabbixHostname: 'FS-PROD-01', description: 'Servidor principal de arquivos' }
-  ]);
-  const [activeServerId, setActiveServerId] = useState('1');
+  const [servers, setServers] = useState<FileServer[]>([]);
+  const [activeServerId, setActiveServerId] = useState<string | null>(null);
   const [isAddingServer, setIsAddingServer] = useState(false);
   const [newServer, setNewServer] = useState({ name: '', hostname: '', desc: '' });
 
-  const activeServer = servers.find(s => s.id === activeServerId) || servers[0];
+  const activeServer = servers.find(s => s.id === activeServerId) || null;
 
   const fetchConfig = async () => {
     try {
@@ -65,6 +63,16 @@ export default function ZabbixDashboard() {
   };
 
   const fetchData = async () => {
+    if (!activeServerId && servers.length > 0) {
+      setActiveServerId(servers[0].id);
+      return;
+    }
+    
+    if (!activeServer) {
+      setLoading(false);
+      return;
+    }
+
     setIsRefreshing(true);
     try {
       const configData = await fetchConfig();
@@ -111,11 +119,13 @@ export default function ZabbixDashboard() {
       const itemsData = await apiFetch('item.get', { 
         hostids: host.hostid, 
         output: ['itemid', 'name', 'lastvalue', 'units', 'key_', 'value_type'],
-        search: { key_: ['vfs.fs', 'system.cpu', 'vm.memory', 'dedup', 'storage'] },
+        // Targeted keys for Windows/Linux drives, CPU and RAM
+        search: { key_: ['vfs.fs.size', 'system.cpu.util', 'vm.memory.size', 'system.cpu.load'] },
         searchByAny: true
       });
       
       const fetchedItems = itemsData.result || [];
+      setItems(fetchedItems);
       processMetrics(fetchedItems);
       setError(null);
     } catch (err: any) {
@@ -163,26 +173,57 @@ export default function ZabbixDashboard() {
   };
 
   const processMetrics = (fetchedItems: ZabbixItem[]) => {
+    // Utility to find specific drive letters or file systems
+    const getDiskDrives = () => {
+      const drives: any[] = [];
+      const totalItems = fetchedItems.filter(i => i.key_.includes('vfs.fs.size') && i.key_.includes('total'));
+      
+      totalItems.forEach(totalItem => {
+        // Extract drive/mount point from key, e.g., vfs.fs.size[C:,total]
+        const match = totalItem.key_.match(/\[(.*?),(.*?)\]/);
+        if (match) {
+          const driveLabel = match[1];
+          const usedItem = fetchedItems.find(i => i.key_.includes(driveLabel) && i.key_.includes('used') && !i.key_.includes('pused'));
+          const freeItem = fetchedItems.find(i => i.key_.includes(driveLabel) && i.key_.includes('free') && !i.key_.includes('pfree'));
+          
+          const total = parseFloat(totalItem.lastvalue);
+          const used = usedItem ? parseFloat(usedItem.lastvalue) : 0;
+          const free = freeItem ? parseFloat(freeItem.lastvalue) : (total - used);
+          
+          if (total > 0) {
+            drives.push({
+              label: driveLabel,
+              total: total,
+              used: used,
+              free: free,
+              percent: Math.round((used / total) * 100)
+            });
+          }
+        }
+      });
+      return drives;
+    };
+
     const findValue = (regex: RegExp) => {
       const item = fetchedItems.find((i: ZabbixItem) => regex.test(i.key_) || regex.test(i.name.toLowerCase()));
       return item ? parseFloat(item.lastvalue) : 0;
     };
 
-    // Improved item search for Linux/Windows/Storage templates
-    const diskTotal = findValue(/vfs.fs.size\[.*,total\]/) || findValue(/total space/) || findValue(/vfs.fs.total/) || findValue(/storage.capacity/);
-    const diskUsed = findValue(/vfs.fs.size\[.*,used\]/) || findValue(/used space/) || findValue(/vfs.fs.used/) || findValue(/storage.used/);
-    const diskFree = findValue(/vfs.fs.size\[.*,free\]/) || findValue(/free space/) || findValue(/vfs.fs.free/) || findValue(/storage.free/);
-    const cpuLoad = findValue(/system.cpu.load\[.*,avg1\]/) || findValue(/system.cpu.util/) || findValue(/cpu utilization/) || findValue(/cpu.load/);
-    const memTotal = findValue(/vm.memory.size\[total\]/) || findValue(/total memory/) || findValue(/mem.total/);
-    const memAvailable = findValue(/vm.memory.size\[available\]/) || findValue(/available memory/) || findValue(/mem.available/);
-    const dedupRatio = findValue(/dedup.ratio/) || searchDedup(fetchedItems) || 1.2;
+    // CPU Logic: Utilization is direct %, Load needs normalization (simplified here as %)
+    const cpuUtil = findValue(/system.cpu.util/) || (findValue(/system.cpu.load/) * 10); 
+    const memTotal = findValue(/vm.memory.size\[total\]/);
+    const memAvailable = findValue(/vm.memory.size\[available\]/);
+    const ramPercent = memTotal > 0 ? Math.round(((memTotal - memAvailable) / memTotal) * 100) : 0;
+    
+    const drives = getDiskDrives();
+    const mainDrive = drives[0] || { percent: 0, free: 0 };
 
     const currentMetrics = {
-      cpu: Math.round(Math.min(cpuLoad, 100)) || 0,
-      ram: memTotal > 0 ? Math.round(((memTotal - memAvailable) / memTotal) * 100) : 0,
-      diskUsed: diskTotal > 0 ? Math.round((diskUsed / diskTotal) * 100) : 0,
-      diskFree: Math.round((diskFree / 1024 / 1024 / 1024) * 100) / 100 || 0,
-      dedup: dedupRatio
+      cpu: Math.min(Math.round(cpuUtil), 100),
+      ram: ramPercent,
+      diskUsed: mainDrive.percent,
+      diskFree: Math.round((mainDrive.free / 1024 / 1024 / 1024) * 10) / 10,
+      drives: drives
     };
 
     setMetrics(currentMetrics);
@@ -222,7 +263,7 @@ export default function ZabbixDashboard() {
     return () => clearInterval(interval);
   }, [activeServerId]);
 
-  if (loading) {
+  if (loading && servers.length > 0) {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-slate-950 text-slate-200">
         <motion.div 
@@ -233,6 +274,58 @@ export default function ZabbixDashboard() {
           <RefreshCcw className="w-10 h-10 text-emerald-500 shadow-[0_0_8px_#10b981]" />
         </motion.div>
         <p className="text-slate-500 font-mono tracking-widest uppercase text-[10px]">Sincronizando com Zabbix...</p>
+      </div>
+    );
+  }
+
+  if (servers.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-slate-950 text-white p-6">
+        <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-xl p-8 text-center shadow-2xl">
+          <Database className="w-16 h-16 text-emerald-500 mx-auto mb-6 opacity-50" />
+          <h2 className="text-2xl font-bold mb-4">Nenhum Servidor Ativo</h2>
+          <p className="text-slate-400 text-sm mb-8 leading-relaxed">
+            Bem-vindo ao Dashboard. Comece adicionando o host que você deseja monitorar no Zabbix.
+          </p>
+          <button 
+            onClick={() => setIsAddingServer(true)}
+            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg transition-all flex items-center justify-center gap-2"
+          >
+            <Database className="w-5 h-5" />
+            Adicionar Primeiro Servidor
+          </button>
+          
+          <AnimatePresence>
+            {isAddingServer && (
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4"
+              >
+                <form onSubmit={handleAddServer} className="bg-slate-900 border border-slate-800 p-8 rounded-xl w-full max-w-md shadow-2xl text-left">
+                  <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                    <Database className="w-5 h-5 text-emerald-500" /> Cadastrar Servidor
+                  </h3>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Nome de Exibição</label>
+                      <input type="text" required className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm focus:outline-none focus:border-emerald-500" placeholder="Ex: Servidor de Arquivos" value={newServer.name} onChange={e => setNewServer({...newServer, name: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Hostname no Zabbix</label>
+                      <input type="text" required className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm focus:outline-none focus:border-emerald-500" placeholder="Ex: FS-RH-01" value={newServer.hostname} onChange={e => setNewServer({...newServer, hostname: e.target.value})} />
+                    </div>
+                  </div>
+                  <div className="flex gap-3 mt-8">
+                    <button type="button" onClick={() => setIsAddingServer(false)} className="flex-1 py-3 border border-slate-800 hover:bg-slate-800 rounded text-sm font-bold">Cancelar</button>
+                    <button type="submit" className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 rounded text-sm font-bold">Salvar</button>
+                  </div>
+                </form>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
     );
   }
@@ -437,8 +530,8 @@ export default function ZabbixDashboard() {
           />
           <MetricCard 
             title="Dedupe Utility" 
-            value={`${metrics.dedup}x`} 
-            subtitle={`${(metrics.dedup * 0.8).toFixed(1)}TB Optimized`}
+            value={`${metrics.dedup || 1.0}x`} 
+            subtitle="Storage Savings"
             icon={<TrendingDown className="w-4 h-4 text-sky-400" />} 
             status="healthy"
           />
@@ -471,22 +564,21 @@ export default function ZabbixDashboard() {
             </div>
 
             <div className="flex-1 overflow-y-auto pr-2 space-y-6 custom-scrollbar">
-              <PartitionRow label="STORAGE_POOL_PRIMARY" used={metrics.diskUsed} freeText={`${metrics.diskFree}GB`} totalText="1.2 TB" />
-              <PartitionRow label="DATA_REPLICATION_LUN" used={42} freeText="5.8TB" totalText="10 TB" />
-              <PartitionRow label="SYSTEM_RESERVED" used={15} freeText="85GB" totalText="100 GB" />
+              {(metrics.drives || []).map((drive: any, idx: number) => (
+                <PartitionRow 
+                  key={idx} 
+                  label={`Drive ${drive.label}`} 
+                  used={drive.percent} 
+                  freeText={`${Math.round(drive.free / 1024 / 1024 / 1024)} GB`} 
+                  totalText={`${Math.round(drive.total / 1024 / 1024 / 1024)} GB`} 
+                />
+              ))}
               
-              <div className="h-48 mt-8 border-t border-slate-800 pt-6">
-                <ResponsiveContainer width="100%" height="100%">
-                   <BarChart data={[{ name: 'Storage', used: metrics.diskUsed, free: 100 - metrics.diskUsed }]} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#ffffff05" />
-                    <XAxis type="number" hide />
-                    <YAxis type="category" dataKey="name" hide />
-                    <Tooltip cursor={{fill: 'transparent'}} contentStyle={{ backgroundColor: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', fontSize: '10px' }} />
-                    <Bar dataKey="used" stackId="a" fill="#3b82f6" radius={[4, 0, 0, 4]} barSize={40} />
-                    <Bar dataKey="free" stackId="a" fill="rgba(30, 41, 59, 0.5)" radius={[0, 4, 4, 0]} barSize={40} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+              {(!metrics.drives || metrics.drives.length === 0) && (
+                <div className="text-center py-10 text-slate-600 font-mono text-[10px]">
+                  Buscando unidades (C:, D:, /)...
+                </div>
+              )}
             </div>
           </div>
 
