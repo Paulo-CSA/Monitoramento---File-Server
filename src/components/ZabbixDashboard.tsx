@@ -38,13 +38,23 @@ export default function ZabbixDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [hostInfo, setHostInfo] = useState<ZabbixHost | null>(null);
   const [items, setItems] = useState<ZabbixItem[]>([]);
-  const [metrics, setMetrics] = useState<any>(null);
+  const [metrics, setMetrics] = useState<any>({
+    cpu: 0,
+    ram: 0,
+    diskUsed: 0,
+    diskFree: 0,
+    dedup: 1.0,
+    drives: []
+  });
   const [aiInsight, setAiInsight] = useState<string>('');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [config, setConfig] = useState<any>(null);
 
   // Server Management State
-  const [servers, setServers] = useState<FileServer[]>([]);
+  const [servers, setServers] = useState<FileServer[]>(() => {
+    const saved = localStorage.getItem('zabbix_servers');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [activeServerId, setActiveServerId] = useState<string | null>(null);
   const [isAddingServer, setIsAddingServer] = useState(false);
   const [newServer, setNewServer] = useState({ name: '', hostname: '', desc: '' });
@@ -169,8 +179,14 @@ export default function ZabbixDashboard() {
     setServers(updated);
     if (activeServerId === id && updated.length > 0) {
       setActiveServerId(updated[0].id);
+    } else if (updated.length === 0) {
+      setActiveServerId(null);
     }
   };
+
+  useEffect(() => {
+    localStorage.setItem('zabbix_servers', JSON.stringify(servers));
+  }, [servers]);
 
   const processMetrics = (fetchedItems: ZabbixItem[]) => {
     // Utility to find specific drive letters or file systems
@@ -219,11 +235,11 @@ export default function ZabbixDashboard() {
     const mainDrive = drives[0] || { percent: 0, free: 0 };
 
     const currentMetrics = {
-      cpu: Math.min(Math.round(cpuUtil), 100),
-      ram: ramPercent,
-      diskUsed: mainDrive.percent,
-      diskFree: Math.round((mainDrive.free / 1024 / 1024 / 1024) * 10) / 10,
-      drives: drives
+      cpu: Math.min(Math.round(cpuUtil || 0), 100),
+      ram: Math.round(ramPercent || 0),
+      diskUsed: Math.round(mainDrive.percent || 0),
+      diskFree: Math.round(((mainDrive.free || 0) / 1024 / 1024 / 1024) * 10) / 10,
+      drives: drives || []
     };
 
     setMetrics(currentMetrics);
@@ -326,6 +342,14 @@ export default function ZabbixDashboard() {
             )}
           </AnimatePresence>
         </div>
+      </div>
+    );
+  }
+
+  if (servers.length > 0 && !activeServer) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-slate-950 text-slate-500">
+        <RefreshCcw className="w-6 h-6 animate-spin" />
       </div>
     );
   }
