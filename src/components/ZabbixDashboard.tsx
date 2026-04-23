@@ -607,7 +607,7 @@ export default function ZabbixDashboard() {
               <h1 className="text-3xl font-black text-white tracking-tighter uppercase">Painel Geral de Armazenamento</h1>
             </header>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {allServersMetrics.map(({ server, metrics, online, error }) => (
                 <motion.div 
                   key={server.id}
