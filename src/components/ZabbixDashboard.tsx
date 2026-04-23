@@ -148,7 +148,8 @@ export default function ZabbixDashboard() {
       const filteredItems = fetchedItems.filter((i: ZabbixItem) => {
         const k = i.key_.toLowerCase();
         const n = i.name.toLowerCase();
-        return k.includes('vfs.fs') || k.includes('c.fs') || k.includes('cpu') || k.includes('memory') || 
+        return k.includes('fs.size') || k.includes('c.fs') || k.includes('vfs.fs') || 
+               k.includes('cpu') || k.includes('memory') || 
                n.includes('disk') || n.includes('storage') || n.includes('cpu') || n.includes('memory');
       });
 
@@ -218,63 +219,79 @@ export default function ZabbixDashboard() {
       // 1. Discovery: Look for anything that looks like a mount point or drive letter
       fetchedItems.forEach(i => {
         const k = i.key_.toLowerCase();
-        // Match vfs.fs.size[C:,...] or vfs.fs.total[C:] or similar
+        // Match bracketed labels like [C:,...] or [C:] or [/]
         const match = i.key_.match(/\[(.*?)(?:,.*?)?\]/);
         if (match && match[1]) {
           const l = match[1].trim();
-          if (l && l.toLowerCase() !== 'total' && (l.includes(':') || l.includes('/'))) {
+          // Exclude generic 'total' or empty labels
+          if (l && l.toLowerCase() !== 'total' && (l.includes(':') || l.includes('/') || l.length <= 3)) {
             labels.add(l);
           }
         }
-        // Fallback for Windows-style names in Zabbix 7 descriptions
+        // Fallback for names: looks for C: or D: in item name
         const nameMatch = i.name.match(/([a-zA-Z]:)/);
         if (nameMatch) labels.add(nameMatch[1]);
       });
 
       // 2. Data Extraction for each discovered label
       Array.from(labels).forEach(label => {
-        const findByParts = (parts: string[]) => 
-          fetchedItems.find(i => 
-            (i.key_.toLowerCase().includes('c.fs.size') || i.key_.toLowerCase().includes('vfs.fs.size')) &&
-            i.key_.includes(label) && parts.every(p => i.key_.toLowerCase().includes(p))
-          ) ||
-          fetchedItems.find(i => 
-            i.key_.includes(label) && parts.every(p => i.key_.toLowerCase().includes(p))
-          ) || 
-          fetchedItems.find(i => 
-            i.name.toLowerCase().includes(label.toLowerCase()) && parts.every(p => i.name.toLowerCase().includes(p))
-          );
+        const lowerLabel = label.toLowerCase();
         
-        const totalItem = findByParts(['total']) || findByParts(['size']);
-        const usedItem = findByParts(['used']) && !findByParts(['pused']) ? findByParts(['used']) : null;
-        const freeItem = findByParts(['free']);
-        const pusedItem = findByParts(['pused']) || findByParts(['percentage', 'used']);
+        const findMetric = (parts: string[], exclude: string[] = []) => {
+          const lowerParts = parts.map(p => p.toLowerCase());
+          const lowerExclude = exclude.map(p => p.toLowerCase());
+          return fetchedItems.find(i => {
+            const lowerK = i.key_.toLowerCase();
+            const lowerN = i.name.toLowerCase();
+            const matchesLabel = lowerK.includes(lowerLabel) || lowerN.includes(lowerLabel);
+            const matchesParts = lowerParts.every(p => lowerK.includes(p) || lowerN.includes(p));
+            const matchesExclude = lowerExclude.some(e => lowerK.includes(e) || lowerN.includes(e));
+            return matchesLabel && matchesParts && !matchesExclude;
+          });
+        };
+        
+        const totalItem = findMetric(['total'], ['pfree', 'pused']) || findMetric(['size'], ['pfree', 'pused']);
+        const usedItem = findMetric(['used'], ['pused']) || findMetric(['used_space']);
+        const freeItem = findMetric(['free'], ['pfree']) || findMetric(['available']);
+        const pusedItem = findMetric(['pused']) || findMetric(['percentage', 'used']);
         
         const total = totalItem ? parseFloat(totalItem.lastvalue) : 0;
         const used = usedItem ? parseFloat(usedItem.lastvalue) : 0;
-        const free = freeItem ? parseFloat(freeItem.lastvalue) : (total > 0 ? total - used : 0);
+        const free = freeItem ? parseFloat(freeItem.lastvalue) : (total > 0 && used > 0 ? total - used : 0);
         
         let percent = 0;
         if (pusedItem) {
           percent = Math.round(parseFloat(pusedItem.lastvalue));
         } else if (total > 0) {
           percent = Math.round((used / total) * 100);
+        } else if (total === 0 && used > 0 && free > 0) {
+          percent = Math.round((used / (used + free)) * 100);
         }
 
-        // Only add if we have at least SOME data
-        if (percent > 0 || total > 0 || free > 0) {
+        // Only add if we represent a real drive with some usage/size info
+        if (percent > 0 || total > 0 || free > 0 || used > 0) {
           drives.push({ 
             label, 
-            total: total > 0 ? total : (used + free), 
-            used: used > 0 ? used : (total * (percent/100)), 
-            free: free > 0 ? free : (total * (1 - percent/100)), 
+            total: total || (used + free), 
+            used: used || (total * (percent/100)), 
+            free: free || (total * (1 - percent/100)), 
             percent 
           });
         }
       });
 
-      // Sort by label (A, B, C...)
-      return drives.sort((a, b) => a.label.localeCompare(b.label));
+      // deduplicate by label (case-insensitive)
+      const uniqueDrives: any[] = [];
+      const seen = new Set();
+      drives.forEach(d => {
+        const l = d.label.toUpperCase();
+        if (!seen.has(l)) {
+          seen.add(l);
+          uniqueDrives.push(d);
+        }
+      });
+
+      return uniqueDrives.sort((a, b) => a.label.localeCompare(b.label));
     };
 
     const findValue = (regex: RegExp) => {
