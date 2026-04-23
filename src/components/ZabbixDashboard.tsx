@@ -148,7 +148,7 @@ export default function ZabbixDashboard() {
       const filteredItems = fetchedItems.filter((i: ZabbixItem) => {
         const k = i.key_.toLowerCase();
         const n = i.name.toLowerCase();
-        return k.includes('vfs.fs') || k.includes('cpu') || k.includes('memory') || 
+        return k.includes('vfs.fs') || k.includes('c.fs') || k.includes('cpu') || k.includes('memory') || 
                n.includes('disk') || n.includes('storage') || n.includes('cpu') || n.includes('memory');
       });
 
@@ -215,32 +215,66 @@ export default function ZabbixDashboard() {
       const drives: any[] = [];
       const labels = new Set<string>();
       
+      // 1. Discovery: Look for anything that looks like a mount point or drive letter
       fetchedItems.forEach(i => {
-        const match = i.key_.match(/vfs\.fs\.size\[(.*?)(?:,.*?)?\]/i) || i.key_.match(/vfs\.fs\.total\[(.*?)\]/i);
-        if (match && match[1] && match[1].toLowerCase() !== 'total') {
-          labels.add(match[1]);
+        const k = i.key_.toLowerCase();
+        // Match vfs.fs.size[C:,...] or vfs.fs.total[C:] or similar
+        const match = i.key_.match(/\[(.*?)(?:,.*?)?\]/);
+        if (match && match[1]) {
+          const l = match[1].trim();
+          if (l && l.toLowerCase() !== 'total' && (l.includes(':') || l.includes('/'))) {
+            labels.add(l);
+          }
         }
+        // Fallback for Windows-style names in Zabbix 7 descriptions
+        const nameMatch = i.name.match(/([a-zA-Z]:)/);
+        if (nameMatch) labels.add(nameMatch[1]);
       });
 
-      labels.forEach(label => {
-        const findByKey = (suffix: string) => fetchedItems.find(i => i.key_.includes(label) && i.key_.toLowerCase().includes(suffix));
+      // 2. Data Extraction for each discovered label
+      Array.from(labels).forEach(label => {
+        const findByParts = (parts: string[]) => 
+          fetchedItems.find(i => 
+            (i.key_.toLowerCase().includes('c.fs.size') || i.key_.toLowerCase().includes('vfs.fs.size')) &&
+            i.key_.includes(label) && parts.every(p => i.key_.toLowerCase().includes(p))
+          ) ||
+          fetchedItems.find(i => 
+            i.key_.includes(label) && parts.every(p => i.key_.toLowerCase().includes(p))
+          ) || 
+          fetchedItems.find(i => 
+            i.name.toLowerCase().includes(label.toLowerCase()) && parts.every(p => i.name.toLowerCase().includes(p))
+          );
         
-        const totalItem = findByKey('total');
-        const usedItem = fetchedItems.find(i => i.key_.includes(label) && i.key_.toLowerCase().includes('used') && !i.key_.includes('pused'));
-        const freeItem = fetchedItems.find(i => i.key_.includes(label) && i.key_.toLowerCase().includes('free') && !i.key_.includes('pfree'));
-        const pusedItem = findByKey('pused');
+        const totalItem = findByParts(['total']) || findByParts(['size']);
+        const usedItem = findByParts(['used']) && !findByParts(['pused']) ? findByParts(['used']) : null;
+        const freeItem = findByParts(['free']);
+        const pusedItem = findByParts(['pused']) || findByParts(['percentage', 'used']);
         
         const total = totalItem ? parseFloat(totalItem.lastvalue) : 0;
         const used = usedItem ? parseFloat(usedItem.lastvalue) : 0;
         const free = freeItem ? parseFloat(freeItem.lastvalue) : (total > 0 ? total - used : 0);
         
-        let percent = pusedItem ? Math.round(parseFloat(pusedItem.lastvalue)) : (total > 0 ? Math.round((used / total) * 100) : 0);
+        let percent = 0;
+        if (pusedItem) {
+          percent = Math.round(parseFloat(pusedItem.lastvalue));
+        } else if (total > 0) {
+          percent = Math.round((used / total) * 100);
+        }
 
-        if (percent > 0 || total > 0) {
-          drives.push({ label, total, used, free, percent });
+        // Only add if we have at least SOME data
+        if (percent > 0 || total > 0 || free > 0) {
+          drives.push({ 
+            label, 
+            total: total > 0 ? total : (used + free), 
+            used: used > 0 ? used : (total * (percent/100)), 
+            free: free > 0 ? free : (total * (1 - percent/100)), 
+            percent 
+          });
         }
       });
-      return drives;
+
+      // Sort by label (A, B, C...)
+      return drives.sort((a, b) => a.label.localeCompare(b.label));
     };
 
     const findValue = (regex: RegExp) => {
