@@ -41,6 +41,8 @@ async function startServer() {
         targetUrl = targetUrl.replace(/\/$/, "") + "/api_jsonrpc.php";
       }
 
+      console.log(`Zabbix Request: ${method} to ${targetUrl}`);
+
       const response = await fetch(targetUrl, {
         method: "POST",
         headers: {
@@ -61,18 +63,31 @@ async function startServer() {
         const errorText = await response.text();
         return res.status(response.status).json({
           error: `Zabbix Server returned HTTP ${response.status}`,
-          details: errorText
+          details: errorText,
+          targetUrl
         });
       }
 
       const data = await response.json();
+      
+      // Zabbix returns 200 even for API errors
+      if (data.error) {
+        return res.status(400).json({
+          error: data.error.message || "Zabbix API Error",
+          details: data.error.data,
+          code: data.error.code,
+          targetUrl
+        });
+      }
+
       res.json(data);
     } catch (error: any) {
       console.error("Zabbix API Error:", error);
       res.status(500).json({ 
         error: "Erro de conexão com o servidor Zabbix.",
         details: error.message,
-        cause: error.cause?.message || error.code || "Conexão recusada ou DNS não resolvido."
+        cause: error.cause?.message || error.code || "Conexão recusada ou DNS não resolvido.",
+        targetUrl: zabbixUrl // Include the original URL attempted
       });
     }
   });

@@ -94,7 +94,6 @@ export default function ZabbixDashboard() {
 
       const hostName = activeServer?.zabbixHostname || configData.hostName;
 
-      // Helper for fetching with error parsing
       const apiFetch = async (method: string, params: any) => {
         const resp = await fetch('/api/zabbix', {
           method: 'POST',
@@ -104,47 +103,69 @@ export default function ZabbixDashboard() {
         const data = await resp.json();
         if (!resp.ok) {
           const errMsg = data.cause || data.error || "Erro de conexão";
+          const details = data.details || data.targetUrl || "";
+          
           if (errMsg.includes("ENOTFOUND") || errMsg.includes("ECONNREFUSED")) {
-             throw new Error("NETWORK_LIMITATION");
+             const error = new Error("NETWORK_LIMITATION");
+             (error as any).details = details;
+             throw error;
           }
-          throw new Error(errMsg);
+          const error = new Error(errMsg);
+          (error as any).details = details;
+          throw error;
         }
         return data;
       };
 
       // 1. Get Host ID
       const hostData = await apiFetch('host.get', { 
-        filter: { host: [hostName] }, 
+        search: { host: [hostName] }, // Use search instead of filter for more flexibility
         output: ['hostid', 'host', 'name'] 
       });
       
-      if (!hostData.result || hostData.result.length === 0) {
+      const hostFound = (hostData.result || []).find((h: any) => 
+        h.host.toLowerCase() === hostName.toLowerCase() || 
+        h.name.toLowerCase() === hostName.toLowerCase()
+      );
+      
+      if (!hostFound) {
         throw new Error(`Servidor "${hostName}" não encontrado no Zabbix.`);
       }
 
-      const host = hostData.result[0];
+      const host = hostFound;
       setHostInfo(host);
 
       // 2. Get All Items for this Host
       const itemsData = await apiFetch('item.get', { 
         hostids: host.hostid, 
         output: ['itemid', 'name', 'lastvalue', 'units', 'key_', 'value_type'],
-        // Targeted keys for Windows/Linux drives, CPU and RAM
-        search: { key_: ['vfs.fs.size', 'system.cpu.util', 'vm.memory.size', 'system.cpu.load'] },
-        searchByAny: true
+        // Fetch more items to ensure we don't miss any due to key naming variations
+        selectValueMap: 'extend',
       });
       
       const fetchedItems = itemsData.result || [];
-      setItems(fetchedItems);
-      processMetrics(fetchedItems);
+      // Filter items manually to avoid Zabbix API 'search' limitations
+      const filteredItems = fetchedItems.filter((i: ZabbixItem) => {
+        const k = i.key_.toLowerCase();
+        const n = i.name.toLowerCase();
+        return k.includes('vfs.fs') || k.includes('cpu') || k.includes('memory') || 
+               n.includes('disk') || n.includes('storage') || n.includes('cpu') || n.includes('memory');
+      });
+
+      setItems(filteredItems);
+      processMetrics(filteredItems);
       setError(null);
     } catch (err: any) {
       console.error(err);
-      if (err.message === "NETWORK_LIMITATION") {
+      // Detailed error for debugging
+      const detailMsg = err.details ? ` (${err.details})` : '';
+      const finalError = `${err.message}${detailMsg}`;
+      
+      if (err.message === "NETWORK_LIMITATION" || finalError.includes("ENOTFOUND") || finalError.includes("ECONNREFUSED")) {
         setError("NETWORK_INTERNAL");
         loadDemoData();
       } else {
-        setError(err.message || "Erro ao buscar dados do Zabbix.");
+        setError(finalError || "Erro ao buscar dados do Zabbix.");
       }
     } finally {
       setLoading(false);
@@ -192,29 +213,31 @@ export default function ZabbixDashboard() {
     // Utility to find specific drive letters or file systems
     const getDiskDrives = () => {
       const drives: any[] = [];
-      const totalItems = fetchedItems.filter(i => i.key_.includes('vfs.fs.size') && i.key_.includes('total'));
+      const labels = new Set<string>();
       
-      totalItems.forEach(totalItem => {
-        // Extract drive/mount point from key, e.g., vfs.fs.size[C:,total]
-        const match = totalItem.key_.match(/\[(.*?),(.*?)\]/);
-        if (match) {
-          const driveLabel = match[1];
-          const usedItem = fetchedItems.find(i => i.key_.includes(driveLabel) && i.key_.includes('used') && !i.key_.includes('pused'));
-          const freeItem = fetchedItems.find(i => i.key_.includes(driveLabel) && i.key_.includes('free') && !i.key_.includes('pfree'));
-          
-          const total = parseFloat(totalItem.lastvalue);
-          const used = usedItem ? parseFloat(usedItem.lastvalue) : 0;
-          const free = freeItem ? parseFloat(freeItem.lastvalue) : (total - used);
-          
-          if (total > 0) {
-            drives.push({
-              label: driveLabel,
-              total: total,
-              used: used,
-              free: free,
-              percent: Math.round((used / total) * 100)
-            });
-          }
+      fetchedItems.forEach(i => {
+        const match = i.key_.match(/vfs\.fs\.size\[(.*?)(?:,.*?)?\]/i) || i.key_.match(/vfs\.fs\.total\[(.*?)\]/i);
+        if (match && match[1] && match[1].toLowerCase() !== 'total') {
+          labels.add(match[1]);
+        }
+      });
+
+      labels.forEach(label => {
+        const findByKey = (suffix: string) => fetchedItems.find(i => i.key_.includes(label) && i.key_.toLowerCase().includes(suffix));
+        
+        const totalItem = findByKey('total');
+        const usedItem = fetchedItems.find(i => i.key_.includes(label) && i.key_.toLowerCase().includes('used') && !i.key_.includes('pused'));
+        const freeItem = fetchedItems.find(i => i.key_.includes(label) && i.key_.toLowerCase().includes('free') && !i.key_.includes('pfree'));
+        const pusedItem = findByKey('pused');
+        
+        const total = totalItem ? parseFloat(totalItem.lastvalue) : 0;
+        const used = usedItem ? parseFloat(usedItem.lastvalue) : 0;
+        const free = freeItem ? parseFloat(freeItem.lastvalue) : (total > 0 ? total - used : 0);
+        
+        let percent = pusedItem ? Math.round(parseFloat(pusedItem.lastvalue)) : (total > 0 ? Math.round((used / total) * 100) : 0);
+
+        if (percent > 0 || total > 0) {
+          drives.push({ label, total, used, free, percent });
         }
       });
       return drives;
@@ -225,11 +248,13 @@ export default function ZabbixDashboard() {
       return item ? parseFloat(item.lastvalue) : 0;
     };
 
-    // CPU Logic: Utilization is direct %, Load needs normalization (simplified here as %)
-    const cpuUtil = findValue(/system.cpu.util/) || (findValue(/system.cpu.load/) * 10); 
-    const memTotal = findValue(/vm.memory.size\[total\]/);
-    const memAvailable = findValue(/vm.memory.size\[available\]/);
-    const ramPercent = memTotal > 0 ? Math.round(((memTotal - memAvailable) / memTotal) * 100) : 0;
+    // CPU Logic
+    const cpuUtil = findValue(/system.cpu.util/) || (findValue(/system.cpu.load/) * 10) || findValue(/cpu utilization/); 
+    
+    // Memory Logic: Support multiple key formats
+    const memTotal = findValue(/vm.memory.size\[total\]/) || findValue(/total memory/) || findValue(/mem.total/);
+    const memAvailable = findValue(/vm.memory.size\[available\]/) || findValue(/vm.memory.size\[free\]/) || findValue(/available memory/) || findValue(/free physical memory/);
+    const ramPercent = memTotal > 0 ? Math.round(((memTotal - (memAvailable || 0)) / memTotal) * 100) : 0;
     
     const drives = getDiskDrives();
     const mainDrive = drives[0] || { percent: 0, free: 0 };
