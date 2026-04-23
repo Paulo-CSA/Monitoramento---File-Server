@@ -607,31 +607,31 @@ export default function ZabbixDashboard() {
               <h1 className="text-3xl font-black text-white tracking-tighter uppercase">Painel Geral de Armazenamento</h1>
             </header>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {allServersMetrics.map(({ server, metrics, online, error }) => (
                 <motion.div 
                   key={server.id}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-2xl relative overflow-hidden group hover:border-blue-500/50 transition-all cursor-pointer ring-1 ring-white/5 hover:ring-blue-500/30"
+                  className="bg-slate-900 border border-slate-800 rounded-lg p-4 shadow-xl relative overflow-hidden group hover:border-blue-500/50 transition-all cursor-pointer ring-1 ring-white/5 hover:ring-blue-500/30"
                   onClick={() => { setActiveServerId(server.id); setActiveView('server'); }}
                 >
-                  <div className="flex items-center justify-between mb-4 relative z-10">
-                    <div>
-                      <h3 className="text-xl font-bold text-white uppercase tracking-tight group-hover:text-blue-400 transition-colors">{server.name}</h3>
-                      <p className="text-[10px] text-slate-500 font-mono italic uppercase tracking-widest">{server.zabbixHostname}</p>
+                  <div className="flex items-center justify-between mb-3 relative z-10">
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-bold text-white uppercase tracking-tight group-hover:text-blue-400 transition-colors truncate">{server.name}</h3>
+                      <p className="text-[9px] text-slate-500 font-mono italic uppercase tracking-widest truncate">{server.zabbixHostname}</p>
                     </div>
-                    <div className="flex gap-4">
+                    <div className="flex gap-2 flex-shrink-0">
                       <div className="flex flex-col items-center">
-                        <div className="text-[8px] uppercase text-slate-500 font-black mb-0.5">CPU</div>
-                        <div className={`text-sm font-black font-mono ${online && metrics.cpu > 80 ? 'text-rose-500' : 'text-emerald-500'}`}>
+                        <div className="text-[7px] uppercase text-slate-500 font-black">CPU</div>
+                        <div className={`text-[11px] font-black font-mono ${online && metrics.cpu > 80 ? 'text-rose-500' : 'text-emerald-500'}`}>
                           {online ? `${metrics.cpu}%` : '--'}
                         </div>
                       </div>
-                      <div className="w-px h-6 bg-slate-800 my-auto"></div>
+                      <div className="w-px h-4 bg-slate-800 my-auto"></div>
                       <div className="flex flex-col items-center">
-                        <div className="text-[8px] uppercase text-slate-500 font-black mb-0.5">RAM</div>
-                        <div className={`text-sm font-black font-mono ${online && metrics.ram > 85 ? 'text-rose-500' : 'text-blue-500'}`}>
+                        <div className="text-[7px] uppercase text-slate-500 font-black">RAM</div>
+                        <div className={`text-[11px] font-black font-mono ${online && metrics.ram > 85 ? 'text-rose-500' : 'text-blue-500'}`}>
                           {online ? `${metrics.ram}%` : '--'}
                         </div>
                       </div>
@@ -639,28 +639,28 @@ export default function ZabbixDashboard() {
                   </div>
 
                   {!online ? (
-                    <div className="flex items-center gap-2 p-4 bg-rose-500/10 border border-rose-500/20 rounded text-rose-400 text-[10px] font-bold uppercase italic">
-                      <AlertTriangle className="w-4 h-4" /> {error || 'Servidor Offline'}
+                    <div className="flex items-center gap-2 p-2 bg-rose-500/10 border border-rose-500/20 rounded text-rose-400 text-[9px] font-bold uppercase italic">
+                      <AlertTriangle className="w-3 h-3" /> {error || 'Offline'}
                     </div>
                   ) : (
-                    <div className="space-y-4">
-                      <div className="text-[10px] uppercase tracking-widest text-slate-600 font-black mb-2">Storage Status</div>
-                      {metrics.drives && metrics.drives.map((drive: any) => (
-                        <div key={drive.label} className="space-y-1.5">
-                          <div className="flex justify-between text-[10px] items-end font-bold">
-                            <span className="text-slate-300 uppercase tracking-wider">{drive.label}</span>
-                            <span className={`font-mono text-xs font-black ${drive.percent > 85 ? 'text-rose-500 animate-pulse' : 'text-slate-400'}`}>
+                    <div className="space-y-2">
+                       <span className="text-[8px] uppercase tracking-widest text-slate-600 font-black">Storage</span>
+                      {metrics.drives && metrics.drives.slice(0, 3).map((drive: any) => (
+                        <div key={drive.label} className="space-y-1">
+                          <div className="flex justify-between text-[9px] items-end font-bold">
+                            <span className="text-slate-400 uppercase tracking-tighter truncate max-w-[60px]">{drive.label}</span>
+                            <span className={`font-mono text-[10px] font-black ${drive.percent > 85 ? 'text-rose-500 animate-pulse' : 'text-slate-400'}`}>
                               {drive.percent}%
                             </span>
                           </div>
-                          <div className="h-3 bg-slate-950 rounded-sm overflow-hidden border border-slate-800 p-0.5 tracking-tighter">
+                          <div className="h-2 bg-slate-950 rounded-sm overflow-hidden border border-slate-800 p-0.5 tracking-tighter">
                             <motion.div 
                               initial={{ width: 0 }}
                               animate={{ width: `${drive.percent}%` }}
                               className={`h-full rounded-sm ${
                                 drive.percent > 85 
                                 ? 'bg-gradient-to-r from-rose-600 to-rose-400 shadow-[0_0_10px_#ef444450]' 
-                                : 'bg-gradient-to-r from-blue-600 to-blue-400 shadow-[0_0_10px_#3b82f630]'
+                                : 'bg-gradient-to-r from-blue-600 to-blue-400 shadow-[0_0_10px_#3b82f610]'
                               }`}
                             />
                           </div>
@@ -669,7 +669,7 @@ export default function ZabbixDashboard() {
                     </div>
                   )}
                   
-                  <div className="absolute top-0 right-0 p-8 bg-white opacity-[0.01] rounded-bl-full pointer-events-none group-hover:opacity-[0.03] transition-all"></div>
+                  <div className="absolute top-0 right-0 p-4 bg-white opacity-[0.01] rounded-bl-full pointer-events-none group-hover:opacity-[0.02] transition-all"></div>
                 </motion.div>
               ))}
             </div>
