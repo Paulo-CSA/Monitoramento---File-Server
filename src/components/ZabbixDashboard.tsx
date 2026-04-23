@@ -49,6 +49,8 @@ export default function ZabbixDashboard() {
   const [aiInsight, setAiInsight] = useState<string>('');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [config, setConfig] = useState<any>(null);
+  const [activeView, setActiveView] = useState<'geral' | 'server'>('geral');
+  const [allServersMetrics, setAllServersMetrics] = useState<any[]>([]);
 
   // Server Management State
   const [servers, setServers] = useState<FileServer[]>(() => {
@@ -78,6 +80,12 @@ export default function ZabbixDashboard() {
       return;
     }
     
+    if (activeView === 'geral') {
+      await fetchAllServersData();
+      setLoading(false);
+      return;
+    }
+
     if (!activeServer) {
       setLoading(false);
       return;
@@ -210,7 +218,54 @@ export default function ZabbixDashboard() {
     localStorage.setItem('zabbix_servers', JSON.stringify(servers));
   }, [servers]);
 
-  const processMetrics = (fetchedItems: ZabbixItem[]) => {
+  const fetchAllServersData = async () => {
+    setIsRefreshing(true);
+    try {
+      const results = [];
+      for (const server of servers) {
+        try {
+          const apiFetch = async (method: string, params: any) => {
+            const resp = await fetch('/api/zabbix', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ method, params })
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error);
+            return data;
+          };
+
+          const hostData = await apiFetch('host.get', { 
+            search: { host: [server.zabbixHostname] },
+            output: ['hostid', 'host', 'name'] 
+          });
+          
+          const host = (hostData.result || []).find((h: any) => 
+            h.host.toLowerCase() === server.zabbixHostname.toLowerCase() || 
+            h.name.toLowerCase() === server.zabbixHostname.toLowerCase()
+          );
+
+          if (host) {
+            const itemsData = await apiFetch('item.get', { hostids: host.hostid, output: ['name', 'lastvalue', 'units', 'key_'] });
+            const fetched = itemsData.result || [];
+            const result = processMetrics(fetched, false);
+            results.push({ server, metrics: result, online: true });
+          } else {
+            results.push({ server, online: false, error: 'Não encontrado' });
+          }
+        } catch (e) {
+          results.push({ server, online: false, error: 'Erro de conexão' });
+        }
+      }
+      setAllServersMetrics(results);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const processMetrics = (fetchedItems: ZabbixItem[], updateState = true) => {
     // Utility to find specific drive letters or file systems
     const getDiskDrives = () => {
       const drives: any[] = [];
@@ -308,7 +363,7 @@ export default function ZabbixDashboard() {
     const ramPercent = memTotal > 0 ? Math.round(((memTotal - (memAvailable || 0)) / memTotal) * 100) : 0;
     
     const drives = getDiskDrives();
-    const mainDrive = drives[0] || { percent: 0, free: 0 };
+    const mainDrive = drives.find(d => d.label.toUpperCase() === 'C:') || drives[0] || { percent: 0, free: 0 };
 
     const currentMetrics = {
       cpu: Math.min(Math.round(cpuUtil || 0), 100),
@@ -318,8 +373,11 @@ export default function ZabbixDashboard() {
       drives: drives || []
     };
 
-    setMetrics(currentMetrics);
-    fetchAiInsight(currentMetrics);
+    if (updateState) {
+      setMetrics(currentMetrics);
+      fetchAiInsight(currentMetrics);
+    }
+    return currentMetrics;
   };
 
   const searchDedup = (items: ZabbixItem[]) => {
@@ -353,7 +411,7 @@ export default function ZabbixDashboard() {
     fetchData();
     const interval = setInterval(fetchData, 60000);
     return () => clearInterval(interval);
-  }, [activeServerId]);
+  }, [activeServerId, activeView]);
 
   if (loading && servers.length > 0) {
     return (
@@ -460,6 +518,18 @@ export default function ZabbixDashboard() {
 
         <nav className="space-y-4 flex-1">
           <div>
+            <button 
+              onClick={() => { setActiveView('geral'); setHostInfo(null); }}
+              className={`w-full flex items-center gap-2 px-3 py-2 rounded-md transition-all mb-4 ${
+                activeView === 'geral' 
+                ? 'bg-emerald-600/10 text-emerald-400 border border-emerald-600/20' 
+                : 'text-slate-400 hover:bg-slate-800'
+              }`}
+            >
+              <Activity className="w-4 h-4" />
+              <span className="text-sm font-medium">Geral</span>
+            </button>
+
             <div className="flex items-center justify-between mb-2 px-2">
               <span className="text-[10px] uppercase tracking-widest text-slate-500">Servidores</span>
               <button 
@@ -474,9 +544,9 @@ export default function ZabbixDashboard() {
               {servers.map(server => (
                 <div key={server.id} className="group relative">
                   <button 
-                    onClick={() => setActiveServerId(server.id)}
+                    onClick={() => { setActiveServerId(server.id); setActiveView('server'); }}
                     className={`w-full text-left px-3 py-2 rounded-md transition-all pr-8 ${
-                      activeServerId === server.id 
+                      activeView === 'server' && activeServerId === server.id 
                       ? 'bg-blue-600/10 text-blue-400 border border-blue-600/20' 
                       : 'text-slate-400 hover:bg-slate-800'
                     }`}
@@ -530,7 +600,83 @@ export default function ZabbixDashboard() {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col gap-4 overflow-hidden relative">
-        <AnimatePresence>
+        {activeView === 'geral' ? (
+          <div className="flex-1 flex flex-col gap-6 overflow-y-auto custom-scrollbar p-2">
+            <header className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-[0.2em] text-slate-500 font-bold">Monitoramento / Global</span>
+              <h1 className="text-3xl font-black text-white tracking-tighter uppercase">Painel Geral de Armazenamento</h1>
+            </header>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {allServersMetrics.map(({ server, metrics, online, error }) => (
+                <motion.div 
+                  key={server.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-2xl relative overflow-hidden group hover:border-blue-500/50 transition-all cursor-pointer ring-1 ring-white/5 hover:ring-blue-500/30"
+                  onClick={() => { setActiveServerId(server.id); setActiveView('server'); }}
+                >
+                  <div className="flex items-center justify-between mb-4 relative z-10">
+                    <div>
+                      <h3 className="text-xl font-bold text-white uppercase tracking-tight group-hover:text-blue-400 transition-colors">{server.name}</h3>
+                      <p className="text-[10px] text-slate-500 font-mono italic uppercase tracking-widest">{server.zabbixHostname}</p>
+                    </div>
+                    <div className="flex gap-4">
+                      <div className="flex flex-col items-center">
+                        <div className="text-[8px] uppercase text-slate-500 font-black mb-0.5">CPU</div>
+                        <div className={`text-sm font-black font-mono ${online && metrics.cpu > 80 ? 'text-rose-500' : 'text-emerald-500'}`}>
+                          {online ? `${metrics.cpu}%` : '--'}
+                        </div>
+                      </div>
+                      <div className="w-px h-6 bg-slate-800 my-auto"></div>
+                      <div className="flex flex-col items-center">
+                        <div className="text-[8px] uppercase text-slate-500 font-black mb-0.5">RAM</div>
+                        <div className={`text-sm font-black font-mono ${online && metrics.ram > 85 ? 'text-rose-500' : 'text-blue-500'}`}>
+                          {online ? `${metrics.ram}%` : '--'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {!online ? (
+                    <div className="flex items-center gap-2 p-4 bg-rose-500/10 border border-rose-500/20 rounded text-rose-400 text-[10px] font-bold uppercase italic">
+                      <AlertTriangle className="w-4 h-4" /> {error || 'Servidor Offline'}
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="text-[10px] uppercase tracking-widest text-slate-600 font-black mb-2">Storage Status</div>
+                      {metrics.drives && metrics.drives.map((drive: any) => (
+                        <div key={drive.label} className="space-y-1.5">
+                          <div className="flex justify-between text-[10px] items-end font-bold">
+                            <span className="text-slate-300 uppercase tracking-wider">{drive.label}</span>
+                            <span className={`font-mono text-xs font-black ${drive.percent > 85 ? 'text-rose-500 animate-pulse' : 'text-slate-400'}`}>
+                              {drive.percent}%
+                            </span>
+                          </div>
+                          <div className="h-3 bg-slate-950 rounded-sm overflow-hidden border border-slate-800 p-0.5 tracking-tighter">
+                            <motion.div 
+                              initial={{ width: 0 }}
+                              animate={{ width: `${drive.percent}%` }}
+                              className={`h-full rounded-sm ${
+                                drive.percent > 85 
+                                ? 'bg-gradient-to-r from-rose-600 to-rose-400 shadow-[0_0_10px_#ef444450]' 
+                                : 'bg-gradient-to-r from-blue-600 to-blue-400 shadow-[0_0_10px_#3b82f630]'
+                              }`}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  
+                  <div className="absolute top-0 right-0 p-8 bg-white opacity-[0.01] rounded-bl-full pointer-events-none group-hover:opacity-[0.03] transition-all"></div>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <>
+            <AnimatePresence>
           {isAddingServer && (
             <motion.div 
               initial={{ opacity: 0, scale: 0.95 }}
@@ -601,12 +747,12 @@ export default function ZabbixDashboard() {
         <header className="flex justify-between items-end">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <span className="text-slate-500 text-xs uppercase tracking-wider">Infrastructure /</span>
+              <span className="text-slate-500 text-xs uppercase tracking-wider">Monitoramento /</span>
               <span className="font-semibold text-xs uppercase tracking-wider text-blue-400 truncate max-w-[200px]">
                 {hostInfo?.host}
               </span>
             </div>
-            <h2 className="text-2xl font-bold tracking-tight text-white">{activeServer?.name} Sentinel</h2>
+            <h2 className="text-2xl font-bold tracking-tight text-white">{activeServer?.name}</h2>
             <p className="text-[10px] text-slate-500 font-mono italic">{activeServer?.description}</p>
           </div>
           
@@ -620,7 +766,7 @@ export default function ZabbixDashboard() {
           </div>
         </header>
 
-        <section className="grid grid-cols-4 gap-4">
+        <section className="grid grid-cols-3 gap-4">
           <MetricCard 
             title="CPU Load" 
             value={`${metrics.cpu}%`} 
@@ -629,18 +775,11 @@ export default function ZabbixDashboard() {
             status={metrics.cpu > 80 ? 'critical' : metrics.cpu > 50 ? 'warning' : 'healthy'}
           />
           <MetricCard 
-            title="Dedupe Utility" 
-            value={`${metrics.dedup || 1.0}x`} 
-            subtitle="Storage Savings"
-            icon={<TrendingDown className="w-4 h-4 text-sky-400" />} 
-            status="healthy"
-          />
-          <MetricCard 
-            title="Storage Delta" 
+            title="Espaço Livre, C:" 
             value={`${metrics.diskFree} GB`} 
             subtitle="Available Capacity"
             icon={<HardDrive className="w-4 h-4 text-emerald-400" />} 
-            status={metrics.diskUsed > 90 ? 'critical' : 'healthy'}
+            status={metrics.diskUsed > 85 ? 'critical' : 'healthy'}
           />
           <MetricCard 
             title="Memory Status" 
@@ -708,8 +847,10 @@ export default function ZabbixDashboard() {
             </div>
           </div>
         </div>
-      </main>
-    </div>
+      </>
+    )}
+  </main>
+</div>
   );
 }
 
