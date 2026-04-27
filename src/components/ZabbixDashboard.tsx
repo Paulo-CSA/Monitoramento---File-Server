@@ -607,31 +607,31 @@ export default function ZabbixDashboard() {
               <h1 className="text-4xl font-black text-white tracking-tighter uppercase">Painel Geral de Armazenamento</h1>
             </header>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
               {allServersMetrics.map(({ server, metrics, online, error }) => (
                 <motion.div 
                   key={server.id}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-2xl relative overflow-hidden group hover:border-emerald-500/50 transition-all cursor-pointer ring-1 ring-white/5 hover:ring-emerald-500/30"
+                  className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-2xl relative overflow-hidden group hover:border-emerald-500/50 transition-all cursor-pointer ring-1 ring-white/5 hover:ring-emerald-500/30"
                   onClick={() => { setActiveServerId(server.id); setActiveView('server'); }}
                 >
-                  <div className="flex items-center justify-between mb-4 relative z-10">
+                  <div className="flex items-center justify-between mb-3 relative z-10">
                     <div className="min-w-0">
-                      <h3 className="text-lg font-black text-white uppercase tracking-tight group-hover:text-emerald-400 transition-colors truncate">{server.name}</h3>
-                      <p className="text-[11px] text-slate-500 font-mono italic uppercase tracking-widest truncate">{server.zabbixHostname}</p>
+                      <h3 className="text-base font-black text-white uppercase tracking-tight group-hover:text-emerald-400 transition-colors truncate">{server.name}</h3>
+                      <p className="text-[9px] text-slate-500 font-mono italic uppercase tracking-widest truncate">{server.zabbixHostname}</p>
                     </div>
-                    <div className="flex gap-4 flex-shrink-0">
+                    <div className="flex gap-3 flex-shrink-0">
                       <div className="flex flex-col items-center">
-                        <div className="text-[10px] uppercase text-slate-500 font-extrabold">CPU</div>
-                        <div className={`text-[15px] font-black font-mono ${online && metrics.cpu > 80 ? 'text-rose-500' : 'text-emerald-400'}`}>
+                        <div className="text-[8px] uppercase text-slate-500 font-extrabold">CPU</div>
+                        <div className={`text-xs font-black font-mono ${online && metrics.cpu > 80 ? 'text-rose-500' : 'text-emerald-400'}`}>
                           {online ? `${metrics.cpu}%` : '--'}
                         </div>
                       </div>
-                      <div className="w-px h-6 bg-slate-800 my-auto"></div>
+                      <div className="w-px h-5 bg-slate-800 my-auto"></div>
                       <div className="flex flex-col items-center">
-                        <div className="text-[10px] uppercase text-slate-500 font-extrabold">RAM</div>
-                        <div className={`text-[15px] font-black font-mono ${online && metrics.ram > 85 ? 'text-rose-500' : 'text-blue-400'}`}>
+                        <div className="text-[8px] uppercase text-slate-500 font-extrabold">RAM</div>
+                        <div className={`text-xs font-black font-mono ${online && metrics.ram > 85 ? 'text-rose-500' : 'text-blue-400'}`}>
                           {online ? `${metrics.ram}%` : '--'}
                         </div>
                       </div>
@@ -639,23 +639,23 @@ export default function ZabbixDashboard() {
                   </div>
 
                   {!online ? (
-                    <div className="flex items-center gap-2 p-3 bg-rose-500/10 border border-rose-500/20 rounded text-rose-400 text-xs font-black uppercase italic">
-                      <AlertTriangle className="w-5 h-5" /> {error || 'OFFLINE'}
+                    <div className="flex items-center gap-2 p-2 bg-rose-500/10 border border-rose-500/20 rounded text-rose-400 text-[10px] font-bold uppercase italic">
+                      <AlertTriangle className="w-4 h-4" /> {error || 'OFFLINE'}
                     </div>
                   ) : (
-                    <div className="space-y-4">
-                       <span className="text-[11px] uppercase tracking-widest text-slate-600 font-black">Storage Units</span>
+                    <div className="space-y-3">
+                       <span className="text-[9px] uppercase tracking-widest text-slate-700 font-black">Storage Units</span>
                       {metrics.drives && metrics.drives.slice(0, 3).map((drive: any) => (
-                        <div key={drive.label} className="space-y-2">
-                          <div className="flex justify-between text-[12px] items-end font-extrabold">
-                            <span className="text-slate-200 uppercase tracking-wide">{drive.label}</span>
-                            <span className={`font-mono text-sm font-black ${drive.percent > 85 ? 'text-rose-500 animate-pulse' : 'text-emerald-400'}`}>
+                        <div key={drive.label} className="space-y-1">
+                          <div className="flex justify-between text-[10px] items-end font-extrabold">
+                            <span className="text-slate-300 uppercase tracking-wide">{drive.label}</span>
+                            <span className={`font-mono text-[10px] font-black ${drive.percent > 85 ? 'text-rose-500 animate-pulse' : 'text-emerald-400'}`}>
                               {drive.percent}%
                             </span>
                           </div>
                           
-                          <div className="flex items-center gap-3">
-                            <div className="flex-1 h-3.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800 p-0.5 relative">
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 h-2.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800 p-0.5 relative">
                               <motion.div 
                                 initial={{ width: 0 }}
                                 animate={{ width: `${drive.percent}%` }}
@@ -668,9 +668,9 @@ export default function ZabbixDashboard() {
                             </div>
                           </div>
                           
-                          <div className="flex justify-between text-[11px] font-black font-mono uppercase tracking-tighter">
-                            <span className="text-slate-400">Total - {Math.round(drive.total / 1024 / 1024 / 1024)}GB</span>
-                            <span className="text-slate-200">{Math.round(drive.free / 1024 / 1024 / 1024)}GB LIVRE</span>
+                          <div className="flex justify-between text-[9px] font-black font-mono uppercase tracking-tighter">
+                            <span className="text-slate-500">T: {Math.round(drive.total / 1024 / 1024 / 1024)}G</span>
+                            <span className="text-slate-200">F: {Math.round(drive.free / 1024 / 1024 / 1024)}G</span>
                           </div>
                         </div>
                       ))}
