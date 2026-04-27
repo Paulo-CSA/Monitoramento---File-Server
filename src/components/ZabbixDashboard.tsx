@@ -510,10 +510,10 @@ export default function ZabbixDashboard() {
   return (
     <div className="flex h-screen w-full p-4 gap-4 bg-slate-950 text-slate-200">
       {/* Sidebar */}
-      <aside className="w-64 bg-slate-900 border border-slate-800 rounded-lg flex flex-col p-4 shadow-xl overflow-y-auto custom-scrollbar">
+      <aside className="w-72 bg-slate-900 border border-slate-800 rounded-lg flex flex-col p-5 shadow-xl overflow-y-auto custom-scrollbar">
         <div className="flex items-center gap-2 mb-8">
-          <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]"></div>
-          <h1 className="font-bold text-lg tracking-tight">Zabbix <span className="text-slate-500">Storage</span></h1>
+          <div className="w-4 h-4 rounded-full bg-emerald-500 shadow-[0_0_10px_#10b981]"></div>
+          <h1 className="font-black text-xl tracking-tighter">ZABBIX <span className="text-slate-500 font-medium">STORAGE</span></h1>
         </div>
 
         <nav className="space-y-4 flex-1">
@@ -531,28 +531,28 @@ export default function ZabbixDashboard() {
             </button>
 
             <div className="flex items-center justify-between mb-2 px-2">
-              <span className="text-[10px] uppercase tracking-widest text-slate-500">Servidores</span>
+              <span className="text-xs uppercase tracking-widest text-slate-500 font-black">Servidores</span>
               <button 
                 onClick={() => setIsAddingServer(true)}
                 className="p-1 hover:bg-slate-800 rounded text-emerald-500 transition-colors"
                 title="Adicionar Servidor"
               >
-                <Database className="w-3 h-3" />
+                <Database className="w-4 h-4" />
               </button>
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               {servers.map(server => (
                 <div key={server.id} className="group relative">
                   <button 
                     onClick={() => { setActiveServerId(server.id); setActiveView('server'); }}
-                    className={`w-full text-left px-3 py-2 rounded-md transition-all pr-8 ${
+                    className={`w-full text-left px-3 py-2.5 rounded-md transition-all pr-8 ${
                       activeView === 'server' && activeServerId === server.id 
                       ? 'bg-blue-600/10 text-blue-400 border border-blue-600/20' 
                       : 'text-slate-400 hover:bg-slate-800'
                     }`}
                   >
-                    <div className="text-sm font-medium truncate">{server.name}</div>
-                    <div className="text-[9px] opacity-60 font-mono">{server.zabbixHostname}</div>
+                    <div className="text-[13px] font-black uppercase truncate">{server.name}</div>
+                    <div className="text-[10px] opacity-60 font-mono font-bold">{server.zabbixHostname}</div>
                   </button>
                   <button 
                     onClick={(e) => handleDeleteServer(server.id, e)}
@@ -581,19 +581,19 @@ export default function ZabbixDashboard() {
           </div>
         )}
 
-        <div className="mt-auto p-3 bg-slate-950 border border-slate-800 rounded text-[10px]">
-          <div className="text-slate-500 mb-1 flex justify-between">
+        <div className="mt-auto p-4 bg-slate-950 border border-slate-800 rounded text-xs font-black">
+          <div className="text-slate-500 mb-2 flex justify-between uppercase">
             <span>Zabbix Token</span>
             <span className="text-emerald-500">Active</span>
           </div>
-          <div className="font-mono text-slate-400 truncate">Token: {config?.hasZabbixToken ? '••••••••' : 'None'}</div>
+          <div className="font-mono text-slate-400 truncate opacity-70">Token: {config?.hasZabbixToken ? '••••••••' : 'None'}</div>
           <button 
             onClick={fetchData}
             disabled={isRefreshing}
-            className="w-full mt-3 flex items-center justify-center gap-2 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded transition-colors"
+            className="w-full mt-4 flex items-center justify-center gap-2 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded transition-colors"
           >
-            <RefreshCcw className={`w-3 h-3 ${isRefreshing ? 'animate-spin' : ''}`} />
-            {isRefreshing ? 'Refreshing...' : 'Poll Now'}
+            <RefreshCcw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            {isRefreshing ? 'Atualizando...' : 'Poll Now'}
           </button>
         </div>
       </aside>
@@ -618,20 +618,20 @@ export default function ZabbixDashboard() {
                 >
                   <div className="flex items-center justify-between mb-3 relative z-10">
                     <div className="min-w-0">
-                      <h3 className="text-base font-black text-white uppercase tracking-tight group-hover:text-emerald-400 transition-colors truncate">{server.name}</h3>
-                      <p className="text-[9px] text-slate-500 font-mono italic uppercase tracking-widest truncate">{server.zabbixHostname}</p>
+                      <h3 className="text-lg font-black text-white uppercase tracking-tight group-hover:text-emerald-400 transition-colors truncate">{server.name}</h3>
+                      <p className="text-xs text-slate-300 font-mono italic uppercase tracking-widest truncate">{server.zabbixHostname}</p>
                     </div>
-                    <div className="flex gap-3 flex-shrink-0">
+                    <div className="flex gap-4 flex-shrink-0">
                       <div className="flex flex-col items-center">
-                        <div className="text-[8px] uppercase text-slate-500 font-extrabold">CPU</div>
-                        <div className={`text-xs font-black font-mono ${online && metrics.cpu > 80 ? 'text-rose-500' : 'text-emerald-400'}`}>
+                        <div className="text-[11px] uppercase text-slate-400 font-black">CPU</div>
+                        <div className={`text-base font-black font-mono ${online && metrics.cpu > 80 ? 'text-rose-500' : 'text-emerald-400'}`}>
                           {online ? `${metrics.cpu}%` : '--'}
                         </div>
                       </div>
-                      <div className="w-px h-5 bg-slate-800 my-auto"></div>
+                      <div className="w-0.5 h-6 bg-slate-700 my-auto"></div>
                       <div className="flex flex-col items-center">
-                        <div className="text-[8px] uppercase text-slate-500 font-extrabold">RAM</div>
-                        <div className={`text-xs font-black font-mono ${online && metrics.ram > 85 ? 'text-rose-500' : 'text-blue-400'}`}>
+                        <div className="text-[11px] uppercase text-slate-400 font-black">RAM</div>
+                        <div className={`text-base font-black font-mono ${online && metrics.ram > 85 ? 'text-rose-500' : 'text-blue-400'}`}>
                           {online ? `${metrics.ram}%` : '--'}
                         </div>
                       </div>
@@ -639,38 +639,38 @@ export default function ZabbixDashboard() {
                   </div>
 
                   {!online ? (
-                    <div className="flex items-center gap-2 p-2 bg-rose-500/10 border border-rose-500/20 rounded text-rose-400 text-[10px] font-bold uppercase italic">
-                      <AlertTriangle className="w-4 h-4" /> {error || 'OFFLINE'}
+                    <div className="flex items-center gap-2 p-2 bg-rose-500/10 border border-rose-500/20 rounded text-rose-400 text-xs font-black uppercase italic">
+                      <AlertTriangle className="w-5 h-5" /> {error || 'OFFLINE'}
                     </div>
                   ) : (
                     <div className="space-y-3">
-                       <span className="text-[9px] uppercase tracking-widest text-slate-700 font-black">Storage Units</span>
+                       <span className="text-[11px] uppercase tracking-widest text-slate-500 font-black">Storage Units</span>
                       {metrics.drives && metrics.drives.slice(0, 3).map((drive: any) => (
-                        <div key={drive.label} className="space-y-1">
-                          <div className="flex justify-between text-[10px] items-end font-extrabold">
-                            <span className="text-slate-300 uppercase tracking-wide">{drive.label}</span>
-                            <span className={`font-mono text-[10px] font-black ${drive.percent > 85 ? 'text-rose-500 animate-pulse' : 'text-emerald-400'}`}>
+                        <div key={drive.label} className="space-y-1.5">
+                          <div className="flex justify-between text-[11px] items-end font-black">
+                            <span className="text-slate-100 uppercase tracking-wide">{drive.label}</span>
+                            <span className={`font-mono text-sm font-black ${drive.percent > 85 ? 'text-rose-500 animate-pulse' : 'text-emerald-300'}`}>
                               {drive.percent}%
                             </span>
                           </div>
                           
                           <div className="flex items-center gap-2">
-                            <div className="flex-1 h-2.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800 p-0.5 relative">
+                            <div className="flex-1 h-3.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800 p-1 relative">
                               <motion.div 
                                 initial={{ width: 0 }}
                                 animate={{ width: `${drive.percent}%` }}
                                 className={`h-full rounded-full ${
                                   drive.percent > 85 
-                                  ? 'bg-gradient-to-r from-rose-600 to-rose-400 shadow-[0_0_15px_#ef444460]' 
-                                  : 'bg-gradient-to-r from-emerald-500 to-emerald-300 shadow-[0_0_15px_#10b98130]'
+                                  ? 'bg-gradient-to-r from-rose-600 to-rose-400 shadow-[0_0_20px_#ef444480]' 
+                                  : 'bg-gradient-to-r from-emerald-500 to-emerald-300 shadow-[0_0_20px_#10b98160]'
                                 }`}
                               />
                             </div>
                           </div>
                           
-                          <div className="flex justify-between text-[9px] font-black font-mono uppercase tracking-tighter">
-                            <span className="text-slate-500">T: {Math.round(drive.total / 1024 / 1024 / 1024)}G</span>
-                            <span className="text-slate-200">F: {Math.round(drive.free / 1024 / 1024 / 1024)}G</span>
+                          <div className="flex justify-between text-[11px] font-black font-mono uppercase tracking-tighter">
+                            <span className="text-slate-300">Total: {Math.round(drive.total / 1024 / 1024 / 1024)}GB</span>
+                            <span className="text-white">Free: {Math.round(drive.free / 1024 / 1024 / 1024)}GB</span>
                           </div>
                         </div>
                       ))}
@@ -801,12 +801,12 @@ export default function ZabbixDashboard() {
         <div className="grid grid-cols-3 flex-1 gap-4 overflow-hidden">
           <div className="col-span-2 bg-slate-900 border border-slate-800 rounded-lg p-5 flex flex-col shadow-lg overflow-hidden">
             <div className="flex justify-between items-center mb-6">
-              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                <Database className="w-3 h-3" /> Disk Partition Breakdown
+              <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                <Database className="w-4 h-4" /> Disk Partition Breakdown
               </h3>
-              <div className="flex gap-4 text-[10px] text-slate-500 font-mono">
-                <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-sm bg-blue-500"></div> USED</div>
-                <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-sm bg-slate-800"></div> FREE</div>
+              <div className="flex gap-4 text-xs text-slate-500 font-mono font-black">
+                <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-blue-500 shadow-[0_0_10px_#3b82f640]"></div> USED</div>
+                <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-slate-800"></div> FREE</div>
               </div>
             </div>
 
@@ -830,27 +830,27 @@ export default function ZabbixDashboard() {
           </div>
 
           <div className="flex flex-col gap-4">
-            <div className="bg-blue-500/5 border border-blue-500/20 rounded-lg p-4 flex-none">
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-[10px] text-blue-400 font-bold uppercase tracking-wider flex items-center gap-1"><Activity className="w-3 h-3" /> Predictive Health</div>
-                <span className="text-[9px] bg-blue-500/20 px-1.5 py-0.5 rounded text-blue-300 uppercase">AI-EXTRACT</span>
+            <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-5 flex-none">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-xs text-blue-400 font-black uppercase tracking-wider flex items-center gap-2"><Activity className="w-4 h-4" /> Predictive Health</div>
+                <span className="text-[10px] font-black bg-blue-500/20 px-2 py-0.5 rounded text-blue-300 uppercase">AI-EXTRACT</span>
               </div>
-              <p className="text-[11px] text-slate-300 leading-relaxed italic">"{aiInsight}"</p>
+              <p className="text-sm text-slate-200 leading-relaxed italic font-medium">"{aiInsight}"</p>
             </div>
 
-            <div className="flex-1 bg-slate-900 border border-slate-800 rounded-lg p-4 flex flex-col shadow-inner">
-              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-6">Resource Monitors</h3>
-              <div className="space-y-6 flex-1">
+            <div className="flex-1 bg-slate-900 border border-slate-800 rounded-lg p-5 flex flex-col shadow-inner">
+              <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-6">Resource Monitors</h3>
+              <div className="space-y-8 flex-1">
                 <MiniLineMonitor label="CPU Consumption" value={metrics.cpu} status={metrics.cpu > 70 ? 'High' : 'Stable'} color={metrics.cpu > 70 ? 'rose' : 'emerald'} />
                 <MiniLineMonitor label="Memory Load" value={metrics.ram} status="Optimized" color="blue" />
-                <div className="mt-2 space-y-1">
-                  <div className="flex justify-between items-center text-[10px] text-slate-500 uppercase font-bold"><span>Cluster Sync</span><span className="text-emerald-500">100%</span></div>
-                  <div className="h-1 w-full bg-slate-800 rounded-full overflow-hidden"><div className="h-full bg-emerald-500 w-full"></div></div>
+                <div className="mt-2 space-y-1.5">
+                  <div className="flex justify-between items-center text-[11px] text-slate-400 uppercase font-black"><span>Cluster Sync</span><span className="text-emerald-500">100%</span></div>
+                  <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden shadow-inner"><div className="h-full bg-emerald-500 w-full shadow-[0_0_10px_#10b981]"></div></div>
                 </div>
               </div>
 
               <div className="mt-auto pt-4 border-t border-slate-800">
-                <div className="flex items-center gap-2 text-slate-600"><Info className="w-3 h-3" /><span className="text-[9px] uppercase tracking-tighter">Zabbix v7.0.4-LTS Connected</span></div>
+                <div className="flex items-center gap-2 text-slate-500 font-black"><Info className="w-4 h-4" /><span className="text-[10px] uppercase tracking-tighter">Zabbix v7.0.4-LTS Connected</span></div>
               </div>
             </div>
           </div>
@@ -886,8 +886,8 @@ function MetricCard({ title, value, icon, status, subtitle }: any) {
         <div className="text-xs text-slate-400 uppercase tracking-wider font-black">{title}</div>
         <div className="p-1 px-1.5 bg-slate-800 rounded">{icon}</div>
       </div>
-      <div className={`text-3xl font-mono font-black leading-none ${textColors[status]}`}>{value}</div>
-      <div className="text-[10px] text-slate-500 mt-2 font-mono uppercase tracking-tight font-bold">{subtitle}</div>
+      <div className={`text-4xl font-mono font-black leading-none ${textColors[status]} mb-1`}>{value}</div>
+      <div className="text-xs text-slate-500 mt-2 font-mono uppercase tracking-tight font-black">{subtitle}</div>
     </motion.div>
   );
 }
@@ -895,21 +895,21 @@ function MetricCard({ title, value, icon, status, subtitle }: any) {
 function PartitionRow({ label, used, freeText, totalText }: any) {
   const isHigh = used > 85;
   return (
-    <div className="space-y-2">
-      <div className="flex justify-between text-xs font-extrabold uppercase">
-        <span className="font-mono text-slate-200">{label}</span>
-        <span className={isHigh ? "text-rose-400 animate-pulse" : "text-sky-400"}>{used}% Used</span>
+    <div className="space-y-2.5">
+      <div className="flex justify-between text-sm font-black uppercase">
+        <span className="font-mono text-slate-100">{label}</span>
+        <span className={isHigh ? "text-rose-400 animate-pulse" : "text-emerald-400"}>{used}% Used</span>
       </div>
-      <div className="h-3 w-full bg-slate-800 rounded-full flex overflow-hidden ring-1 ring-white/5 p-0.5">
+      <div className="h-4.5 w-full bg-slate-950 rounded-full flex overflow-hidden ring-1 ring-white/10 p-1">
         <motion.div 
           initial={{ width: 0 }}
           animate={{ width: `${used}%` }}
-          className={`h-full rounded-full transition-all ${isHigh ? 'bg-rose-500' : 'bg-emerald-500'}`} 
+          className={`h-full rounded-full transition-all ${isHigh ? 'bg-rose-500 shadow-[0_0_15px_#ef4444]' : 'bg-emerald-500 shadow-[0_0_15px_#10b981]'}`} 
         />
       </div>
-      <div className="flex justify-between text-[11px] text-slate-400 font-extrabold font-mono uppercase tracking-tighter">
+      <div className="flex justify-between text-xs text-slate-400 font-black font-mono uppercase tracking-tighter">
         <span>Total: {totalText}</span>
-        <span className={isHigh ? "text-rose-400/80" : ""}>{freeText} Free</span>
+        <span className={isHigh ? "text-rose-400" : "text-slate-300"}>{freeText} Free</span>
       </div>
     </div>
   );
@@ -929,12 +929,12 @@ function MiniLineMonitor({ label, value, status, color }: any) {
   };
 
   return (
-    <div className="space-y-2">
-      <div className="flex justify-between items-center text-[10px] uppercase font-bold tracking-tight">
-        <span className="text-slate-400">{label}</span>
-        <span className={`font-mono ${textMap[color]}`}>{status}</span>
+    <div className="space-y-3">
+      <div className="flex justify-between items-center text-[11px] uppercase font-black tracking-tight">
+        <span className="text-slate-300">{label}</span>
+        <span className={`font-mono font-black ${textMap[color]}`}>{status}</span>
       </div>
-      <div className="h-10 bg-slate-950/80 border border-slate-800 flex items-end p-1 gap-1 rounded overflow-hidden">
+      <div className="h-12 bg-slate-950 border-2 border-slate-800 flex items-end p-1.5 gap-1.5 rounded-md overflow-hidden">
         {/* Mocking recent history bars */}
         {[30, 25, 45, valToPercent(value), 32, 28, valToPercent(value)].map((h, i) => (
           <div 
