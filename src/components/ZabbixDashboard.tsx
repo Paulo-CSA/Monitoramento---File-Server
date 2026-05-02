@@ -53,13 +53,41 @@ export default function ZabbixDashboard() {
   const [allServersMetrics, setAllServersMetrics] = useState<any[]>([]);
 
   // Server Management State
-  const [servers, setServers] = useState<FileServer[]>(() => {
-    const saved = localStorage.getItem('zabbix_servers');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [servers, setServers] = useState<FileServer[]>([]);
   const [activeServerId, setActiveServerId] = useState<string | null>(null);
   const [isAddingServer, setIsAddingServer] = useState(false);
   const [newServer, setNewServer] = useState({ name: '', hostname: '', desc: '' });
+
+  // Initial fetch from backend
+  useEffect(() => {
+    const initServers = async () => {
+      try {
+        const res = await fetch('/api/servers');
+        const data = await res.json();
+        if (data.servers) {
+          setServers(data.servers);
+          if (data.servers.length > 0) {
+            setActiveServerId(data.servers[0].id);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load servers from backend", err);
+      }
+    };
+    initServers();
+  }, []);
+
+  const saveServers = async (updatedServers: FileServer[]) => {
+    try {
+      await fetch('/api/servers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ servers: updatedServers })
+      });
+    } catch (err) {
+      console.error("Failed to save servers to backend", err);
+    }
+  };
 
   const activeServer = servers.find(s => s.id === activeServerId) || null;
 
@@ -182,7 +210,7 @@ export default function ZabbixDashboard() {
     }
   };
 
-  const handleAddServer = (e: React.FormEvent) => {
+  const handleAddServer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newServer.name || !newServer.hostname) return;
     
@@ -193,20 +221,19 @@ export default function ZabbixDashboard() {
       description: newServer.desc
     };
     
-    setServers([...servers, server]);
+    const updatedServers = [...servers, server];
+    setServers(updatedServers);
+    await saveServers(updatedServers);
     setNewServer({ name: '', hostname: '', desc: '' });
     setIsAddingServer(false);
     setActiveServerId(server.id);
   };
 
-  const handleDeleteServer = (id: string, e: React.MouseEvent) => {
+  const handleDeleteServer = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (servers.length <= 1) {
-      // Prevent deleting last server if you want, but user asked to delete even demo
-      // We can just keep an empty list or show a message
-    }
     const updated = servers.filter(s => s.id !== id);
     setServers(updated);
+    await saveServers(updated);
     if (activeServerId === id && updated.length > 0) {
       setActiveServerId(updated[0].id);
     } else if (updated.length === 0) {
@@ -214,9 +241,6 @@ export default function ZabbixDashboard() {
     }
   };
 
-  useEffect(() => {
-    localStorage.setItem('zabbix_servers', JSON.stringify(servers));
-  }, [servers]);
 
   const fetchAllServersData = async () => {
     setIsRefreshing(true);

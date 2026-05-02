@@ -3,17 +3,46 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
+import fs from "fs/promises";
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const DB_PATH = path.join(__dirname, "database.json");
 
 async function startServer() {
   const app = express();
-  const PORT = 5000;
+  const PORT = 3000;
 
   app.use(express.json());
+
+  // Ensure database.json exists
+  try {
+    await fs.access(DB_PATH);
+  } catch {
+    await fs.writeFile(DB_PATH, JSON.stringify({ servers: [] }, null, 2));
+  }
+
+  // Servers Persistence API
+  app.get("/api/servers", async (req, res) => {
+    try {
+      const data = await fs.readFile(DB_PATH, "utf-8");
+      res.json(JSON.parse(data));
+    } catch (error) {
+      res.status(500).json({ error: "Failed to read database" });
+    }
+  });
+
+  app.post("/api/servers", async (req, res) => {
+    try {
+      const { servers } = req.body;
+      await fs.writeFile(DB_PATH, JSON.stringify({ servers }, null, 2));
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to save to database" });
+    }
+  });
 
   // Zabbix Proxy API
   app.post("/api/zabbix", async (req, res) => {
