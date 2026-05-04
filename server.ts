@@ -14,7 +14,7 @@ const DB_PATH = path.resolve(process.cwd(), "database.json");
 async function startServer() {
   const app = express();
   
-  const PORT = 5000;
+  const PORT = 3000;
 
   app.use(express.json());
 
