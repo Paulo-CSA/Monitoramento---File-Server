@@ -62,18 +62,26 @@ export default function ZabbixDashboard() {
   useEffect(() => {
     const initServers = async () => {
       console.log("Iniciando busca de servidores no backend...");
+      setLoading(true);
       try {
         const res = await fetch('/api/servers');
+        if (!res.ok) throw new Error("Erro ao buscar servidores");
         const data = await res.json();
-        console.log("Servidores recuperados:", data);
-        if (data.servers) {
+        console.log("Servidores recuperados do database.json:", data);
+        
+        if (data && data.servers && Array.isArray(data.servers)) {
           setServers(data.servers);
           if (data.servers.length > 0) {
             setActiveServerId(data.servers[0].id);
+          } else {
+            setLoading(false);
           }
+        } else {
+          setLoading(false);
         }
       } catch (err) {
         console.error("Erro ao carregar servidores do backend:", err);
+        setLoading(false);
       }
     };
     initServers();
@@ -140,10 +148,11 @@ export default function ZabbixDashboard() {
         });
         const data = await resp.json();
         if (!resp.ok) {
-          const errMsg = data.cause || data.error || "Erro de conexão";
-          const details = data.details || data.targetUrl || "";
+          const errMsg = data.error || "Erro de conexão";
+          const details = data.details || data.hint || "";
           
-          if (errMsg.includes("ENOTFOUND") || errMsg.includes("ECONNREFUSED")) {
+          if (errMsg === "DNS_NOT_FOUND" || errMsg === "CONNECTION_FAILED" || details.includes("ENOTFOUND")) {
+             console.warn("Zabbix inacessível. Entrando em modo demonstração.");
              const error = new Error("NETWORK_LIMITATION");
              (error as any).details = details;
              throw error;

@@ -21,26 +21,27 @@ async function startServer() {
   // Garante que o database.json existe e é válido antes de prosseguir
   const initDatabase = async () => {
     try {
-      console.log(`Verificando banco de dados em: ${DB_PATH}`);
+      console.log(`[DB] Verificando banco de dados em: ${DB_PATH}`);
       const exists = await fs.access(DB_PATH).then(() => true).catch(() => false);
       if (!exists) {
-        console.log("Arquivo database.json não encontrado, criando novo...");
+        console.log("[DB] Arquivo database.json não encontrado, criando novo padrão...");
         await fs.writeFile(DB_PATH, JSON.stringify({ servers: [] }, null, 2));
       } else {
         const content = await fs.readFile(DB_PATH, "utf-8");
         try {
           const db = JSON.parse(content);
-          if (!db.servers) {
+          if (!db.servers || !Array.isArray(db.servers)) {
+             console.log("[DB] Formato inválido, corrigindo...");
              await fs.writeFile(DB_PATH, JSON.stringify({ servers: [] }, null, 2));
           }
-          console.log(`Banco de dados carregado: ${db.servers?.length || 0} servidores encontrados.`);
+          console.log(`[DB] Sucesso: ${db.servers?.length || 0} servidores carregados.`);
         } catch (e) {
-          console.error("Database.json corrompido, resetando...");
+          console.error("[DB] Arquivo corrompido, resetando...");
           await fs.writeFile(DB_PATH, JSON.stringify({ servers: [] }, null, 2));
         }
       }
     } catch (err) {
-      console.error("Erro crítico ao inicializar banco de dados:", err);
+      console.error("[DB] Erro crítico na inicialização:", err);
     }
   };
 
@@ -141,12 +142,18 @@ async function startServer() {
 
       res.json(data);
     } catch (error: any) {
-      console.error("Zabbix API Error:", error);
+      console.error("Zabbix Proxy Error:", error.message);
+      
+      const isDnsError = error.message.includes("ENOTFOUND") || error.code === "ENOTFOUND";
+      const isConnError = error.message.includes("ECONNREFUSED") || error.code === "ECONNREFUSED";
+      
       res.status(500).json({ 
-        error: "Erro de conexão com o servidor Zabbix.",
+        error: isDnsError ? "DNS_NOT_FOUND" : "CONNECTION_FAILED",
         details: error.message,
-        cause: error.cause?.message || error.code || "Conexão recusada ou DNS não resolvido.",
-        targetUrl: zabbixUrl // Include the original URL attempted
+        hint: isDnsError 
+          ? `O endereço ${zabbixUrl} não foi encontrado. Verifique se o host está correto ou se é um endereço interno privado.`
+          : "Não foi possível conectar ao servidor Zabbix. Verifique o firewall ou se o serviço está rodando.",
+        targetUrl: zabbixUrl
       });
     }
   });
