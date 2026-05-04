@@ -9,18 +9,27 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DB_PATH = path.join(__dirname, "database.json");
+const DB_PATH = path.resolve(process.cwd(), "database.json");
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = 5000;
 
   app.use(express.json());
 
-  // Ensure database.json exists
+  // Ensure database.json exists and is valid
   try {
-    await fs.access(DB_PATH);
-  } catch {
+    const exists = await fs.access(DB_PATH).then(() => true).catch(() => false);
+    if (!exists) {
+      console.log("Database file not found, creating new one...");
+      await fs.writeFile(DB_PATH, JSON.stringify({ servers: [] }, null, 2));
+    } else {
+      // Check if it's valid JSON
+      const content = await fs.readFile(DB_PATH, "utf-8");
+      JSON.parse(content);
+    }
+  } catch (err) {
+    console.error("Invalid database.json, resetting...", err);
     await fs.writeFile(DB_PATH, JSON.stringify({ servers: [] }, null, 2));
   }
 
@@ -28,8 +37,10 @@ async function startServer() {
   app.get("/api/servers", async (req, res) => {
     try {
       const data = await fs.readFile(DB_PATH, "utf-8");
+      console.log("Loading servers from database.json");
       res.json(JSON.parse(data));
     } catch (error) {
+      console.error("Failed to read database:", error);
       res.status(500).json({ error: "Failed to read database" });
     }
   });
@@ -37,9 +48,14 @@ async function startServer() {
   app.post("/api/servers", async (req, res) => {
     try {
       const { servers } = req.body;
+      if (!Array.isArray(servers)) {
+        return res.status(400).json({ error: "Invalid data format: 'servers' must be an array" });
+      }
       await fs.writeFile(DB_PATH, JSON.stringify({ servers }, null, 2));
+      console.log(`Saved ${servers.length} servers to database.json`);
       res.json({ success: true });
     } catch (error) {
+      console.error("Failed to save to database:", error);
       res.status(500).json({ error: "Failed to save to database" });
     }
   });
