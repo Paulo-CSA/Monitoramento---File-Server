@@ -1,0 +1,10 @@
+{
+  "servers": [
+    {
+      "id": "1714823847000",
+      "name": "Servidor de Arquivos (Teste)",
+      "zabbixHostname": "Zabbix Server",
+      "description": "Servidor de teste para validar persistência"
+    }
+  ]
+}

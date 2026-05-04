@@ -61,9 +61,11 @@ export default function ZabbixDashboard() {
   // Initial fetch from backend
   useEffect(() => {
     const initServers = async () => {
+      console.log("Iniciando busca de servidores no backend...");
       try {
         const res = await fetch('/api/servers');
         const data = await res.json();
+        console.log("Servidores recuperados:", data);
         if (data.servers) {
           setServers(data.servers);
           if (data.servers.length > 0) {
@@ -71,7 +73,7 @@ export default function ZabbixDashboard() {
           }
         }
       } catch (err) {
-        console.error("Failed to load servers from backend", err);
+        console.error("Erro ao carregar servidores do backend:", err);
       }
     };
     initServers();

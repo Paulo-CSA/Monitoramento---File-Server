@@ -13,32 +13,46 @@ const DB_PATH = path.resolve(process.cwd(), "database.json");
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  
+  const PORT = 5000;
 
   app.use(express.json());
 
-  // Ensure database.json exists and is valid
-  try {
-    const exists = await fs.access(DB_PATH).then(() => true).catch(() => false);
-    if (!exists) {
-      console.log("Database file not found, creating new one...");
-      await fs.writeFile(DB_PATH, JSON.stringify({ servers: [] }, null, 2));
-    } else {
-      // Check if it's valid JSON
-      const content = await fs.readFile(DB_PATH, "utf-8");
-      JSON.parse(content);
+  // Garante que o database.json existe e é válido antes de prosseguir
+  const initDatabase = async () => {
+    try {
+      console.log(`Verificando banco de dados em: ${DB_PATH}`);
+      const exists = await fs.access(DB_PATH).then(() => true).catch(() => false);
+      if (!exists) {
+        console.log("Arquivo database.json não encontrado, criando novo...");
+        await fs.writeFile(DB_PATH, JSON.stringify({ servers: [] }, null, 2));
+      } else {
+        const content = await fs.readFile(DB_PATH, "utf-8");
+        try {
+          const db = JSON.parse(content);
+          if (!db.servers) {
+             await fs.writeFile(DB_PATH, JSON.stringify({ servers: [] }, null, 2));
+          }
+          console.log(`Banco de dados carregado: ${db.servers?.length || 0} servidores encontrados.`);
+        } catch (e) {
+          console.error("Database.json corrompido, resetando...");
+          await fs.writeFile(DB_PATH, JSON.stringify({ servers: [] }, null, 2));
+        }
+      }
+    } catch (err) {
+      console.error("Erro crítico ao inicializar banco de dados:", err);
     }
-  } catch (err) {
-    console.error("Invalid database.json, resetting...", err);
-    await fs.writeFile(DB_PATH, JSON.stringify({ servers: [] }, null, 2));
-  }
+  };
+
+  await initDatabase();
 
   // Servers Persistence API
   app.get("/api/servers", async (req, res) => {
     try {
       const data = await fs.readFile(DB_PATH, "utf-8");
-      console.log("Loading servers from database.json");
-      res.json(JSON.parse(data));
+      const db = JSON.parse(data);
+      console.log(`Loading ${db.servers?.length || 0} servers from database.json`);
+      res.json(db);
     } catch (error) {
       console.error("Failed to read database:", error);
       res.status(500).json({ error: "Failed to read database" });
