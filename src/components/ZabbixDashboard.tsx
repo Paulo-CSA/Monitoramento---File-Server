@@ -11,6 +11,7 @@ import {
   TrendingDown,
   Info,
   Trash2,
+  Edit2,
   X
 } from 'lucide-react';
 import {
@@ -57,6 +58,9 @@ export default function ZabbixDashboard() {
   const [activeServerId, setActiveServerId] = useState<string | null>(null);
   const [isAddingServer, setIsAddingServer] = useState(false);
   const [newServer, setNewServer] = useState({ name: '', hostname: '', desc: '' });
+  const [isEditingServer, setIsEditingServer] = useState(false);
+  const [editingServer, setEditingServer] = useState<FileServer | null>(null);
+  const [editForm, setEditForm] = useState({ name: '', hostname: '', desc: '' });
 
   // Initial fetch from backend
   useEffect(() => {
@@ -238,6 +242,44 @@ export default function ZabbixDashboard() {
     setNewServer({ name: '', hostname: '', desc: '' });
     setIsAddingServer(false);
     setActiveServerId(server.id);
+  };
+
+  const handleStartEdit = (server: FileServer, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingServer(server);
+    setEditForm({
+      name: server.name,
+      hostname: server.zabbixHostname,
+      desc: server.description || ''
+    });
+    setIsEditingServer(true);
+  };
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingServer) return;
+    if (!editForm.name || !editForm.hostname) return;
+
+    const updatedServers = servers.map(s => {
+      if (s.id === editingServer.id) {
+        return {
+          ...s,
+          name: editForm.name,
+          zabbixHostname: editForm.hostname,
+          description: editForm.desc
+        };
+      }
+      return s;
+    });
+
+    setServers(updatedServers);
+    await saveServers(updatedServers);
+    setIsEditingServer(false);
+    setEditingServer(null);
+    
+    if (activeServerId === editingServer.id) {
+      fetchData();
+    }
   };
 
   const handleDeleteServer = async (id: string, e: React.MouseEvent) => {
@@ -549,22 +591,31 @@ export default function ZabbixDashboard() {
                 <div key={server.id} className="group relative">
                   <button 
                     onClick={() => { setActiveServerId(server.id); setActiveView('server'); }}
-                    className={`w-full text-left px-3 py-2.5 rounded-md transition-all pr-8 ${
+                    className={`w-full text-left px-3 py-2.5 rounded-md transition-all pr-14 ${
                       activeView === 'server' && activeServerId === server.id 
                       ? 'bg-blue-600/10 text-blue-400 border border-blue-600/20' 
                       : 'text-slate-400 hover:bg-slate-800'
                     }`}
                   >
-                    <div className="text-[13px] font-black uppercase truncate">{server.name}</div>
-                    <div className="text-[10px] opacity-60 font-mono font-bold">{server.zabbixHostname}</div>
+                    <div className="text-[13px] font-black uppercase truncate pr-2">{server.name}</div>
+                    <div className="text-[10px] opacity-60 font-mono font-bold truncate pr-2">{server.zabbixHostname}</div>
                   </button>
-                  <button 
-                    onClick={(e) => handleDeleteServer(server.id, e)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-600 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"
-                    title="Excluir Servidor"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                    <button 
+                      onClick={(e) => handleStartEdit(server, e)}
+                      className="p-1 text-slate-600 hover:text-amber-500 transition-all"
+                      title="Editar Servidor"
+                    >
+                      <Edit2 className="w-3 h-3" />
+                    </button>
+                    <button 
+                      onClick={(e) => handleDeleteServer(server.id, e)}
+                      className="p-1 text-slate-600 hover:text-rose-500 transition-all"
+                      title="Excluir Servidor"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
                 </div>
               ))}
               {servers.length === 0 && (
@@ -662,6 +713,78 @@ export default function ZabbixDashboard() {
                 <button 
                   type="submit"
                   className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 rounded text-sm font-bold transition-all"
+                >
+                  Salvar
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Edit Server Modal - Global */}
+      <AnimatePresence>
+        {isEditingServer && editingServer && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4"
+          >
+            <form onSubmit={handleSaveEdit} className="bg-slate-900 border border-slate-800 p-8 rounded-xl w-full max-w-md shadow-2xl">
+              <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                <Edit2 className="w-5 h-5 text-amber-500" /> Editar Servidor
+              </h3>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Nome de Exibição</label>
+                  <input 
+                    type="text" 
+                    required
+                    className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm focus:outline-none focus:border-amber-500 transition-colors"
+                    placeholder="Ex: Produção-FS-01"
+                    value={editForm.name}
+                    onChange={e => setEditForm({...editForm, name: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Hostname no Zabbix</label>
+                  <input 
+                    type="text" 
+                    required
+                    className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm focus:outline-none focus:border-amber-500 transition-colors"
+                    placeholder="Nome exato como está no Zabbix"
+                    value={editForm.hostname}
+                    onChange={e => setEditForm({...editForm, hostname: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Descrição</label>
+                  <input 
+                    type="text" 
+                    className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm focus:outline-none focus:border-amber-500 transition-colors"
+                    placeholder="Opcional"
+                    value={editForm.desc}
+                    onChange={e => setEditForm({...editForm, desc: e.target.value})}
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3 mt-8">
+                <button 
+                  type="button"
+                  onClick={() => {
+                    setIsEditingServer(false);
+                    setEditingServer(null);
+                  }}
+                  className="flex-1 py-3 border border-slate-800 hover:bg-slate-800 rounded text-sm font-bold transition-all"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit"
+                  className="flex-1 py-3 bg-amber-600 hover:bg-amber-500 rounded text-sm font-bold transition-all text-white"
                 >
                   Salvar
                 </button>
