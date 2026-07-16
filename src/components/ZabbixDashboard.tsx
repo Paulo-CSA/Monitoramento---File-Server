@@ -597,8 +597,8 @@ export default function ZabbixDashboard() {
                       : 'text-slate-400 hover:bg-slate-800'
                     }`}
                   >
-                    <div className="text-[13px] font-black uppercase truncate pr-2">{server.name}</div>
-                    <div className="text-[10px] opacity-60 font-mono font-bold truncate pr-2">{server.zabbixHostname}</div>
+                    <div className="text-[13px] font-black uppercase truncate pr-2">{server.zabbixHostname}</div>
+                    <div className="text-[10px] opacity-60 font-mono font-bold truncate pr-2">{server.name}</div>
                   </button>
                   <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
                     <button 
@@ -814,8 +814,8 @@ export default function ZabbixDashboard() {
                 >
                   <div className="flex items-center justify-between mb-3 relative z-10">
                     <div className="min-w-0">
-                      <h3 className="text-lg font-black text-white uppercase tracking-tight group-hover:text-emerald-400 transition-colors truncate">{server.name}</h3>
-                      <p className="text-xs text-slate-300 font-mono italic uppercase tracking-widest truncate">{server.zabbixHostname}</p>
+                      <h3 className="text-lg font-black text-white uppercase tracking-tight group-hover:text-emerald-400 transition-colors truncate">{server.zabbixHostname}</h3>
+                      <p className="text-xs text-slate-300 font-mono italic uppercase tracking-widest truncate">{server.name}</p>
                     </div>
                     <div className="flex gap-4 flex-shrink-0">
                       <div className="flex flex-col items-center">
