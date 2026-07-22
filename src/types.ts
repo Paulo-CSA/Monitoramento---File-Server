@@ -23,9 +23,23 @@ export interface MetricData {
   value: number;
 }
 
+export interface ServerImage {
+  id: string;
+  url: string;
+}
+
+export interface ServerNoteItem {
+  id: string;
+  text: string;
+  completed?: boolean;
+}
+
 export interface FileServer {
   id: string;
   name: string;
   zabbixHostname: string;
   description: string;
+  images?: ServerImage[];
+  notes?: ServerNoteItem[];
+  noteText?: string;
 }

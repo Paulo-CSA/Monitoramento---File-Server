@@ -12,7 +12,15 @@ import {
   Info,
   Trash2,
   Edit2,
-  X
+  X,
+  Image as ImageIcon,
+  Upload,
+  FileText,
+  CheckSquare,
+  Square,
+  Save,
+  Plus,
+  Maximize2
 } from 'lucide-react';
 import {
   AreaChart,
@@ -30,7 +38,7 @@ import {
 } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
 import { getHealthAssessment } from '../services/geminiService';
-import { ZabbixItem, ZabbixHost, FileServer } from '../types';
+import { ZabbixItem, ZabbixHost, FileServer, ServerImage, ServerNoteItem } from '../types';
 
 const COLORS = ['#10b981', '#f59e0b', '#ef4444', '#3b82f6'];
 
@@ -61,6 +69,19 @@ export default function ZabbixDashboard() {
   const [isEditingServer, setIsEditingServer] = useState(false);
   const [editingServer, setEditingServer] = useState<FileServer | null>(null);
   const [editForm, setEditForm] = useState({ name: '', hostname: '', desc: '' });
+
+  // Image Gallery & Notes State
+  const [selectedFullImage, setSelectedFullImage] = useState<string | null>(null);
+  const [isEditingNote, setIsEditingNote] = useState(false);
+  const [noteTextDraft, setNoteTextDraft] = useState('');
+  const [newCheckitemText, setNewCheckitemText] = useState('');
+
+  useEffect(() => {
+    const server = servers.find(s => s.id === activeServerId);
+    if (server) {
+      setNoteTextDraft(server.noteText || '');
+    }
+  }, [activeServerId, servers]);
 
   // Initial fetch from backend
   useEffect(() => {
@@ -292,6 +313,142 @@ export default function ZabbixDashboard() {
     } else if (updated.length === 0) {
       setActiveServerId(null);
     }
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeServerId) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxDim = 1000;
+        let width = img.width;
+        let height = img.height;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+
+        const newImage: ServerImage = { id: Date.now().toString(), url: dataUrl };
+        const updatedServers = servers.map(s => {
+          if (s.id === activeServerId) {
+            return {
+              ...s,
+              images: [...(s.images || []), newImage]
+            };
+          }
+          return s;
+        });
+
+        setServers(updatedServers);
+        saveServers(updatedServers);
+      };
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleDeleteImage = async (imageId: string) => {
+    if (!activeServerId) return;
+    const updatedServers = servers.map(s => {
+      if (s.id === activeServerId) {
+        return {
+          ...s,
+          images: (s.images || []).filter(img => img.id !== imageId)
+        };
+      }
+      return s;
+    });
+    setServers(updatedServers);
+    await saveServers(updatedServers);
+  };
+
+  const handleSaveNoteText = async () => {
+    if (!activeServerId) return;
+    const updatedServers = servers.map(s => {
+      if (s.id === activeServerId) {
+        return {
+          ...s,
+          noteText: noteTextDraft
+        };
+      }
+      return s;
+    });
+    setServers(updatedServers);
+    await saveServers(updatedServers);
+    setIsEditingNote(false);
+  };
+
+  const handleAddChecklistItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCheckitemText.trim() || !activeServerId) return;
+
+    const newItem: ServerNoteItem = {
+      id: Date.now().toString(),
+      text: newCheckitemText.trim(),
+      completed: false
+    };
+
+    const updatedServers = servers.map(s => {
+      if (s.id === activeServerId) {
+        return {
+          ...s,
+          notes: [...(s.notes || []), newItem]
+        };
+      }
+      return s;
+    });
+
+    setServers(updatedServers);
+    await saveServers(updatedServers);
+    setNewCheckitemText('');
+  };
+
+  const handleToggleChecklistItem = async (itemId: string) => {
+    if (!activeServerId) return;
+    const updatedServers = servers.map(s => {
+      if (s.id === activeServerId) {
+        const updatedNotes = (s.notes || []).map(item => {
+          if (item.id === itemId) {
+            return { ...item, completed: !item.completed };
+          }
+          return item;
+        });
+        return { ...s, notes: updatedNotes };
+      }
+      return s;
+    });
+    setServers(updatedServers);
+    await saveServers(updatedServers);
+  };
+
+  const handleDeleteChecklistItem = async (itemId: string) => {
+    if (!activeServerId) return;
+    const updatedServers = servers.map(s => {
+      if (s.id === activeServerId) {
+        return {
+          ...s,
+          notes: (s.notes || []).filter(item => item.id !== itemId)
+        };
+      }
+      return s;
+    });
+    setServers(updatedServers);
+    await saveServers(updatedServers);
   };
 
 
@@ -927,7 +1084,7 @@ export default function ZabbixDashboard() {
         </section>
 
         <div className="grid grid-cols-3 flex-1 gap-4 overflow-hidden">
-          <div className="col-span-2 bg-slate-900 border border-slate-800 rounded-lg p-5 flex flex-col shadow-lg overflow-hidden">
+          <div className="col-span-2 bg-slate-900 border border-slate-800 rounded-lg p-5 flex flex-col shadow-lg overflow-y-auto custom-scrollbar">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
                 <Database className="w-4 h-4" /> Disk Partition Breakdown
@@ -938,7 +1095,7 @@ export default function ZabbixDashboard() {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto pr-2 space-y-6 custom-scrollbar">
+            <div className="space-y-6 pr-2 mb-6">
               {(metrics.drives || []).map((drive: any, idx: number) => (
                 <PartitionRow 
                   key={idx} 
@@ -950,10 +1107,180 @@ export default function ZabbixDashboard() {
               ))}
               
               {(!metrics.drives || metrics.drives.length === 0) && (
-                <div className="text-center py-10 text-slate-600 font-mono text-[10px]">
+                <div className="text-center py-6 text-slate-600 font-mono text-[10px]">
                   Buscando unidades (C:, D:, /)...
                 </div>
               )}
+            </div>
+
+            {/* Quadros Proporcionais Integrados ao Card */}
+            <div className="mt-auto pt-5 border-t border-slate-800/80 grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Quadro 1: Galeria de Imagens com Upload e Deleção (Compacto - 1 Coluna) */}
+              <div className="md:col-span-1 bg-slate-950/80 border border-slate-800 rounded-lg p-3.5 flex flex-col justify-between shadow-inner">
+                <div>
+                  <div className="flex justify-between items-center mb-2.5">
+                    <span className="text-[11px] font-black uppercase text-slate-300 flex items-center gap-1.5 whitespace-nowrap">
+                      <ImageIcon className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" /> Galeria
+                    </span>
+                    <label className="cursor-pointer px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-[10px] font-bold flex items-center gap-1.5 transition-all shadow-sm whitespace-nowrap flex-shrink-0">
+                      <Upload className="w-3 h-3" /> Adicionar
+                      <input 
+                        type="file" 
+                        accept="image/*" 
+                        className="hidden" 
+                        onChange={handleImageUpload}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 max-h-[140px] overflow-y-auto custom-scrollbar p-0.5">
+                    {(activeServer?.images || []).map((img) => (
+                      <div 
+                        key={img.id} 
+                        className="relative group aspect-square bg-slate-900 rounded-md border border-slate-800 overflow-hidden cursor-pointer"
+                      >
+                        <img 
+                          src={img.url} 
+                          alt="Miniatura" 
+                          className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                          onClick={() => setSelectedFullImage(img.url)}
+                        />
+                        <div 
+                          onClick={() => setSelectedFullImage(img.url)}
+                          className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
+                        >
+                          <Maximize2 className="w-4 h-4 text-white drop-shadow" />
+                        </div>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteImage(img.id);
+                          }}
+                          className="absolute top-1 right-1 p-1 bg-rose-600/90 hover:bg-rose-500 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                          title="Excluir Imagem"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+
+                    {(!activeServer?.images || activeServer.images.length === 0) && (
+                      <label className="col-span-2 border border-dashed border-slate-800/80 hover:border-blue-500/50 rounded-lg p-2.5 flex flex-col items-center justify-center gap-1 text-center cursor-pointer transition-colors min-h-[90px] bg-slate-900/40">
+                        <Upload className="w-4 h-4 text-slate-500" />
+                        <span className="text-[10px] text-slate-400 font-bold">Nenhuma imagem</span>
+                        <span className="text-[8px] text-blue-400 font-black uppercase tracking-wider">Clique p/ Upload</span>
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          className="hidden" 
+                          onChange={handleImageUpload}
+                        />
+                      </label>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-2.5 pt-2 border-t border-slate-800/50 text-[9px] text-slate-500 font-mono italic flex justify-between">
+                  <span className="truncate">Clique para ampliar</span>
+                  <span className="flex-shrink-0 ml-1">{activeServer?.images?.length || 0} fotos</span>
+                </div>
+              </div>
+
+              {/* Quadro 2: Bloco de Anotações & Lista (Expandido - 2 Colunas com Barra de Rolagem) */}
+              <div className="md:col-span-2 bg-slate-950/80 border border-slate-800 rounded-lg p-3.5 flex flex-col justify-between shadow-inner">
+                <div className="flex-1 flex flex-col min-w-0">
+                  <div className="flex justify-between items-center mb-2.5">
+                    <span className="text-[11px] font-black uppercase text-slate-300 flex items-center gap-1.5 whitespace-nowrap">
+                      <FileText className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" /> Bloco de Anotações & Observações
+                    </span>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      {!isEditingNote ? (
+                        <button 
+                          onClick={() => setIsEditingNote(true)}
+                          className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-amber-400 rounded text-[10px] font-bold flex items-center gap-1 transition-all"
+                        >
+                          <Edit2 className="w-3 h-3" /> Editar
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={handleSaveNoteText}
+                          className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded text-[10px] font-bold flex items-center gap-1 transition-all shadow-sm"
+                        >
+                          <Save className="w-3 h-3" /> Salvar
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {isEditingNote ? (
+                    <div className="space-y-2 flex-1 flex flex-col">
+                      <textarea 
+                        value={noteTextDraft}
+                        onChange={(e) => setNoteTextDraft(e.target.value)}
+                        placeholder="Escreva anotações ou observações detalhadas do servidor..."
+                        className="w-full h-28 bg-slate-900 border border-slate-800 rounded p-2.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500 font-mono resize-y custom-scrollbar min-h-[80px]"
+                      />
+                      <form onSubmit={handleAddChecklistItem} className="flex gap-1.5">
+                        <input 
+                          type="text" 
+                          value={newCheckitemText}
+                          onChange={(e) => setNewCheckitemText(e.target.value)}
+                          placeholder="Novo item de lista..."
+                          className="flex-1 bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-xs text-white focus:outline-none focus:border-amber-500"
+                        />
+                        <button 
+                          type="submit"
+                          className="px-3 py-1 bg-amber-600/30 border border-amber-500/50 hover:bg-amber-600/50 text-amber-300 text-xs font-bold rounded transition-colors flex items-center gap-1 whitespace-nowrap"
+                        >
+                          <Plus className="w-3 h-3" /> Item
+                        </button>
+                      </form>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 flex-1 flex flex-col">
+                      {/* Container com barra de rolagem para ver todo o texto das anotações */}
+                      <div className="max-h-36 overflow-y-auto custom-scrollbar bg-slate-900/70 p-3 rounded-lg border border-slate-800/80">
+                        <p className="text-xs text-slate-200 whitespace-pre-wrap font-mono leading-relaxed">
+                          {activeServer?.noteText || "Nenhuma anotação cadastrada. Clique em Editar para adicionar."}
+                        </p>
+                      </div>
+
+                      {(activeServer?.notes || []).length > 0 && (
+                        <div className="max-h-24 overflow-y-auto space-y-1 custom-scrollbar pr-1 mt-1">
+                          {(activeServer?.notes || []).map((item) => (
+                            <div key={item.id} className="flex items-center justify-between text-xs bg-slate-900/60 px-2.5 py-1 rounded border border-slate-800/50">
+                              <button 
+                                onClick={() => handleToggleChecklistItem(item.id)}
+                                className="flex items-center gap-2 text-left flex-1 min-w-0"
+                              >
+                                {item.completed ? (
+                                  <CheckSquare className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                                ) : (
+                                  <Square className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
+                                )}
+                                <span className={`truncate text-[11px] ${item.completed ? 'line-through text-slate-500' : 'text-slate-200 font-medium'}`}>
+                                  {item.text}
+                                </span>
+                              </button>
+                              <button 
+                                onClick={() => handleDeleteChecklistItem(item.id)}
+                                className="text-slate-600 hover:text-rose-400 p-0.5 ml-1 transition-colors"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-2.5 pt-2 border-t border-slate-800/50 text-[9px] text-slate-500 font-mono italic flex justify-between">
+                  <span>Anotações & Checklist</span>
+                  <span>{(activeServer?.notes || []).filter(n => n.completed).length}/{(activeServer?.notes || []).length} itens concluídos</span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -985,8 +1312,36 @@ export default function ZabbixDashboard() {
         </div>
       </>
     )}
-  </main>
-</div>
+      </main>
+
+      {/* Modal Foto Tamanho Real */}
+      <AnimatePresence>
+        {selectedFullImage && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4"
+            onClick={() => setSelectedFullImage(null)}
+          >
+            <div className="relative max-w-5xl max-h-[90vh] flex flex-col items-center" onClick={e => e.stopPropagation()}>
+              <button 
+                onClick={() => setSelectedFullImage(null)}
+                className="absolute -top-10 right-0 text-slate-400 hover:text-white bg-slate-900 border border-slate-800 p-2 rounded-full transition-colors shadow-lg"
+                title="Fechar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <img 
+                src={selectedFullImage} 
+                alt="Imagem em tamanho real" 
+                className="max-w-full max-h-[85vh] object-contain rounded-xl border border-slate-800 shadow-2xl"
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 
