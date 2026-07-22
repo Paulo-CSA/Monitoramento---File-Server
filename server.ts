@@ -20,17 +20,28 @@ async function processAndSaveBase64Images(servers: any[]) {
       if (Array.isArray(server.images)) {
         for (const img of server.images) {
           if (img && typeof img.url === "string" && img.url.startsWith("data:image/")) {
-            const matches = img.url.match(/^data:image\/([a-zA-Z0-9\+\-]+);base64,(.+)$/);
-            if (matches) {
-              const rawType = matches[1].toLowerCase();
-              const ext = rawType === "jpeg" ? "jpg" : (rawType === "svg+xml" ? "svg" : rawType);
-              const base64Data = matches[2];
+            const commaIndex = img.url.indexOf(",");
+            if (commaIndex !== -1) {
+              const header = img.url.substring(0, commaIndex);
+              const base64Data = img.url.substring(commaIndex + 1);
+
+              let ext = "png";
+              const mimeMatch = header.match(/data:image\/([^;]+);/);
+              if (mimeMatch) {
+                const mime = mimeMatch[1].toLowerCase();
+                if (mime === "jpeg" || mime === "jpg") ext = "jpg";
+                else if (mime === "png") ext = "png";
+                else if (mime === "gif") ext = "gif";
+                else if (mime === "webp") ext = "webp";
+                else if (mime.includes("svg")) ext = "svg";
+              }
+
               const buffer = Buffer.from(base64Data, "base64");
               const filename = `img_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
               const filePath = path.join(IMG_DIR, filename);
               await fs.writeFile(filePath, buffer);
               img.url = `/img/${filename}`;
-              console.log(`[IMG] Convertido base64 para arquivo de imagem: ${img.url}`);
+              console.log(`[IMG] Base64 salvo em /img: ${img.url}`);
             }
           }
         }
@@ -99,14 +110,25 @@ async function startServer() {
         return res.json({ success: true, url: image, id: Date.now().toString() });
       }
 
-      const matches = image.match(/^data:image\/([a-zA-Z0-9\+\-]+);base64,(.+)$/);
-      if (!matches) {
+      const commaIndex = image.indexOf(",");
+      if (!image.startsWith("data:image/") || commaIndex === -1) {
         return res.status(400).json({ error: "Formato de imagem base64 inválido" });
       }
 
-      const rawType = matches[1].toLowerCase();
-      const ext = rawType === "jpeg" ? "jpg" : (rawType === "svg+xml" ? "svg" : rawType);
-      const base64Data = matches[2];
+      const header = image.substring(0, commaIndex);
+      const base64Data = image.substring(commaIndex + 1);
+
+      let ext = "png";
+      const mimeMatch = header.match(/data:image\/([^;]+);/);
+      if (mimeMatch) {
+        const mime = mimeMatch[1].toLowerCase();
+        if (mime === "jpeg" || mime === "jpg") ext = "jpg";
+        else if (mime === "png") ext = "png";
+        else if (mime === "gif") ext = "gif";
+        else if (mime === "webp") ext = "webp";
+        else if (mime.includes("svg")) ext = "svg";
+      }
+
       const buffer = Buffer.from(base64Data, "base64");
 
       await fs.mkdir(IMG_DIR, { recursive: true });
@@ -117,7 +139,7 @@ async function startServer() {
       await fs.writeFile(filePath, buffer);
       const imageUrl = `/img/${filename}`;
 
-      console.log(`[IMG] Imagem salva no disco: ${filePath}`);
+      console.log(`[IMG] Imagem salva no disco em /img: ${filePath}`);
       return res.json({ success: true, url: imageUrl, id: Date.now().toString() });
     } catch (error: any) {
       console.error("[IMG] Erro ao salvar imagem:", error);

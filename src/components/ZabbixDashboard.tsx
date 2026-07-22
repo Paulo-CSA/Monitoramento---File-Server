@@ -377,50 +377,32 @@ export default function ZabbixDashboard() {
     const file = e.target.files?.[0];
     if (!file || !activeServerId) return;
 
-    const isPng = file.type === 'image/png' || file.name.toLowerCase().endsWith('.png');
-
     const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target?.result as string;
-      img.onload = async () => {
-        const canvas = document.createElement('canvas');
-        const maxDim = 2200;
-        let width = img.width;
-        let height = img.height;
-        if (width > maxDim || height > maxDim) {
-          if (width > height) {
-            height = Math.round((height * maxDim) / width);
-            width = maxDim;
-          } else {
-            width = Math.round((width * maxDim) / height);
-            height = maxDim;
-          }
+    reader.onload = async (event) => {
+      const dataUrl = event.target?.result as string;
+      if (!dataUrl) return;
+
+      setSaveStatus('saving');
+      try {
+        // Envia a imagem para o servidor para ser salva na pasta /img
+        const uploadRes = await fetch('/api/upload-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: dataUrl, serverId: activeServerId })
+        });
+
+        if (!uploadRes.ok) {
+          const errorData = await uploadRes.json().catch(() => ({}));
+          throw new Error(errorData.error || "Erro ao fazer upload da imagem");
         }
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0, width, height);
 
-        const mimeType = isPng ? 'image/png' : 'image/jpeg';
-        const dataUrl = canvas.toDataURL(mimeType, isPng ? undefined : 0.88);
+        const uploadData = await uploadRes.json();
+        const savedUrl = uploadData.url; // caminho /img/img_...
+        const newImage: ServerImage = { id: uploadData.id || Date.now().toString(), url: savedUrl };
 
-        setSaveStatus('saving');
-        try {
-          // Envia a imagem para o servidor para ser salva na pasta /img
-          const uploadRes = await fetch('/api/upload-image', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image: dataUrl, serverId: activeServerId })
-          });
-
-          if (!uploadRes.ok) throw new Error("Erro ao fazer upload da imagem");
-
-          const uploadData = await uploadRes.json();
-          const savedUrl = uploadData.url; // caminho /img/img_...jpg
-          const newImage: ServerImage = { id: uploadData.id || Date.now().toString(), url: savedUrl };
-
-          const updatedServers = servers.map(s => {
+        let latestServers: FileServer[] = [];
+        setServers(prevServers => {
+          latestServers = prevServers.map(s => {
             if (s.id === activeServerId) {
               return {
                 ...s,
@@ -429,14 +411,16 @@ export default function ZabbixDashboard() {
             }
             return s;
           });
+          return latestServers;
+        });
 
-          setServers(updatedServers);
-          await saveServers(updatedServers);
-        } catch (err) {
-          console.error("Erro no envio da imagem:", err);
-          setSaveStatus('error');
+        if (latestServers.length > 0) {
+          await saveServers(latestServers);
         }
-      };
+      } catch (err) {
+        console.error("Erro no envio da imagem:", err);
+        setSaveStatus('error');
+      }
     };
     reader.readAsDataURL(file);
     e.target.value = '';
@@ -455,32 +439,44 @@ export default function ZabbixDashboard() {
       }).catch(() => {});
     }
 
-    const updatedServers = servers.map(s => {
-      if (s.id === activeServerId) {
-        return {
-          ...s,
-          images: (s.images || []).filter(img => img.id !== imageId)
-        };
-      }
-      return s;
+    let latestServers: FileServer[] = [];
+    setServers(prevServers => {
+      latestServers = prevServers.map(s => {
+        if (s.id === activeServerId) {
+          return {
+            ...s,
+            images: (s.images || []).filter(img => img.id !== imageId)
+          };
+        }
+        return s;
+      });
+      return latestServers;
     });
-    setServers(updatedServers);
-    await saveServers(updatedServers);
+
+    if (latestServers.length > 0) {
+      await saveServers(latestServers);
+    }
   };
 
   const handleSaveNoteText = async () => {
     if (!activeServerId) return;
-    const updatedServers = servers.map(s => {
-      if (s.id === activeServerId) {
-        return {
-          ...s,
-          noteText: noteTextDraft
-        };
-      }
-      return s;
+    let latestServers: FileServer[] = [];
+    setServers(prevServers => {
+      latestServers = prevServers.map(s => {
+        if (s.id === activeServerId) {
+          return {
+            ...s,
+            noteText: noteTextDraft
+          };
+        }
+        return s;
+      });
+      return latestServers;
     });
-    setServers(updatedServers);
-    await saveServers(updatedServers);
+
+    if (latestServers.length > 0) {
+      await saveServers(latestServers);
+    }
     setIsEditingNote(false);
   };
 
@@ -494,53 +490,70 @@ export default function ZabbixDashboard() {
       completed: false
     };
 
-    const updatedServers = servers.map(s => {
-      if (s.id === activeServerId) {
-        return {
-          ...s,
-          noteText: noteTextDraft,
-          notes: [...(s.notes || []), newItem]
-        };
-      }
-      return s;
+    let latestServers: FileServer[] = [];
+    setServers(prevServers => {
+      latestServers = prevServers.map(s => {
+        if (s.id === activeServerId) {
+          return {
+            ...s,
+            noteText: noteTextDraft,
+            notes: [...(s.notes || []), newItem]
+          };
+        }
+        return s;
+      });
+      return latestServers;
     });
 
-    setServers(updatedServers);
-    await saveServers(updatedServers);
+    if (latestServers.length > 0) {
+      await saveServers(latestServers);
+    }
     setNewCheckitemText('');
   };
 
   const handleToggleChecklistItem = async (itemId: string) => {
     if (!activeServerId) return;
-    const updatedServers = servers.map(s => {
-      if (s.id === activeServerId) {
-        const updatedNotes = (s.notes || []).map(item => {
-          if (item.id === itemId) {
-            return { ...item, completed: !item.completed };
-          }
-          return item;
-        });
-        return { ...s, notes: updatedNotes };
-      }
-      return s;
+    let latestServers: FileServer[] = [];
+    setServers(prevServers => {
+      latestServers = prevServers.map(s => {
+        if (s.id === activeServerId) {
+          const updatedNotes = (s.notes || []).map(item => {
+            if (item.id === itemId) {
+              return { ...item, completed: !item.completed };
+            }
+            return item;
+          });
+          return { ...s, notes: updatedNotes };
+        }
+        return s;
+      });
+      return latestServers;
     });
-    setServers(updatedServers);
-    await saveServers(updatedServers);
+
+    if (latestServers.length > 0) {
+      await saveServers(latestServers);
+    }
   };
 
   const handleDeleteChecklistItem = async (itemId: string) => {
     if (!activeServerId) return;
-    const updatedServers = servers.map(s => {
-      if (s.id === activeServerId) {
-        return {
-          ...s,
-          notes: (s.notes || []).filter(item => item.id !== itemId)
-        };
-      }
-      return s;
+    let latestServers: FileServer[] = [];
+    setServers(prevServers => {
+      latestServers = prevServers.map(s => {
+        if (s.id === activeServerId) {
+          return {
+            ...s,
+            notes: (s.notes || []).filter(item => item.id !== itemId)
+          };
+        }
+        return s;
+      });
+      return latestServers;
     });
-    setServers(updatedServers);
-    await saveServers(updatedServers);
+
+    if (latestServers.length > 0) {
+      await saveServers(latestServers);
+    }
   };
 
 
