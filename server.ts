@@ -4,6 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import fs from "fs/promises";
+import multer from "multer";
 
 dotenv.config();
 
@@ -23,6 +24,24 @@ async function saveBufferToImg(filename: string, buffer: Buffer) {
   await fs.writeFile(path.join(ROOT_IMG_DIR, filename), buffer);
   await fs.writeFile(path.join(PUBLIC_IMG_DIR, filename), buffer);
 }
+
+// Configuração do Multer para upload multipart/form-data
+const storage = multer.diskStorage({
+  destination: async (req, file, cb) => {
+    await ensureImgDirs();
+    cb(null, PUBLIC_IMG_DIR);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname) || ".png";
+    const filename = `img_${Date.now()}_${Math.random().toString(36).substring(2, 8)}${ext}`;
+    cb(null, filename);
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit
+});
 
 async function processAndSaveBase64Images(servers: any[]) {
   if (!Array.isArray(servers)) return servers;
@@ -110,64 +129,122 @@ async function startServer() {
 
   await initDatabase();
 
-  // Upload Image Endpoint
-  app.post("/api/upload-image", async (req, res) => {
+  // Upload Image Endpoint (Aceita multipart/form-data via Multer e Base64 JSON como fallback)
+  app.post("/api/upload-image", upload.single("image"), async (req, res) => {
     try {
-      const { image } = req.body;
-      if (!image || typeof image !== "string") {
-        return res.status(400).json({ error: "Nenhuma imagem enviada" });
+      let imageUrl = "";
+      const imageId = Date.now().toString();
+      const serverId = req.body?.serverId;
+
+      if (req.file) {
+        // Upload via Form-Data (Multer)
+        const filename = req.file.filename;
+        const publicPath = path.join(PUBLIC_IMG_DIR, filename);
+        const rootPath = path.join(ROOT_IMG_DIR, filename);
+        await fs.copyFile(publicPath, rootPath).catch(() => {});
+        imageUrl = `/img/${filename}`;
+      } else if (req.body?.image && typeof req.body.image === "string") {
+        // Upload via Base64 JSON fallback
+        const { image } = req.body;
+        if (image.startsWith("/img/")) {
+          imageUrl = image;
+        } else {
+          const commaIndex = image.indexOf(",");
+          if (image.startsWith("data:image/") && commaIndex !== -1) {
+            const header = image.substring(0, commaIndex);
+            const base64Data = image.substring(commaIndex + 1);
+
+            let ext = "png";
+            const mimeMatch = header.match(/data:image\/([^;]+);/);
+            if (mimeMatch) {
+              const mime = mimeMatch[1].toLowerCase();
+              if (mime === "jpeg" || mime === "jpg") ext = "jpg";
+              else if (mime === "png") ext = "png";
+              else if (mime === "gif") ext = "gif";
+              else if (mime === "webp") ext = "webp";
+              else if (mime.includes("svg")) ext = "svg";
+            }
+
+            const buffer = Buffer.from(base64Data, "base64");
+            const filename = `img_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
+
+            await saveBufferToImg(filename, buffer);
+            imageUrl = `/img/${filename}`;
+          }
+        }
       }
 
-      if (image.startsWith("/img/")) {
-        return res.json({ success: true, url: image, id: Date.now().toString() });
+      if (!imageUrl) {
+        return res.status(400).json({ error: "Nenhuma imagem válida enviada" });
       }
 
-      const commaIndex = image.indexOf(",");
-      if (!image.startsWith("data:image/") || commaIndex === -1) {
-        return res.status(400).json({ error: "Formato de imagem base64 inválido" });
+      // Auto-salva a imagem vinculada ao servidor no database.json se serverId for informado
+      let updatedServers: any[] = [];
+      if (serverId) {
+        try {
+          const data = await fs.readFile(DB_PATH, "utf-8");
+          const db = JSON.parse(data);
+          if (Array.isArray(db.servers)) {
+            const newImg = { id: imageId, url: imageUrl };
+            db.servers = db.servers.map((s: any) => {
+              if (s.id === serverId) {
+                const existingImages = Array.isArray(s.images) ? s.images : [];
+                return { ...s, images: [...existingImages, newImg] };
+              }
+              return s;
+            });
+            await fs.writeFile(DB_PATH, JSON.stringify(db, null, 2));
+            updatedServers = db.servers;
+            console.log(`[IMG] Imagem ${imageUrl} vinculada e salva no servidor ${serverId}`);
+          }
+        } catch (err) {
+          console.error("[IMG] Erro ao atualizar database.json para o servidor:", err);
+        }
       }
 
-      const header = image.substring(0, commaIndex);
-      const base64Data = image.substring(commaIndex + 1);
-
-      let ext = "png";
-      const mimeMatch = header.match(/data:image\/([^;]+);/);
-      if (mimeMatch) {
-        const mime = mimeMatch[1].toLowerCase();
-        if (mime === "jpeg" || mime === "jpg") ext = "jpg";
-        else if (mime === "png") ext = "png";
-        else if (mime === "gif") ext = "gif";
-        else if (mime === "webp") ext = "webp";
-        else if (mime.includes("svg")) ext = "svg";
-      }
-
-      const buffer = Buffer.from(base64Data, "base64");
-      const filename = `img_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
-
-      await saveBufferToImg(filename, buffer);
-      const imageUrl = `/img/${filename}`;
-
-      console.log(`[IMG] Imagem salva no disco em /img e /public/img: ${imageUrl}`);
-      return res.json({ success: true, url: imageUrl, id: Date.now().toString() });
+      console.log(`[IMG] Imagem disponível em: ${imageUrl}`);
+      return res.json({ success: true, url: imageUrl, id: imageId, servers: updatedServers });
     } catch (error: any) {
       console.error("[IMG] Erro ao salvar imagem:", error);
-      return res.status(500).json({ error: "Erro interno ao salvar imagem no servidor" });
+      return res.status(500).json({ error: error.message || "Erro interno ao salvar imagem no servidor" });
     }
   });
 
   // Delete Image Endpoint
   app.post("/api/delete-image", async (req, res) => {
     try {
-      const { url } = req.body;
+      const { url, serverId, imageId } = req.body;
       if (url && typeof url === "string" && url.startsWith("/img/")) {
         const filename = path.basename(url);
         await fs.unlink(path.join(ROOT_IMG_DIR, filename)).catch(() => {});
         await fs.unlink(path.join(PUBLIC_IMG_DIR, filename)).catch(() => {});
         console.log(`[IMG] Imagem apagada do disco: ${filename}`);
       }
-      res.json({ success: true });
-    } catch (e) {
-      res.json({ success: true });
+
+      let updatedServers: any[] = [];
+      if (serverId && imageId) {
+        try {
+          const data = await fs.readFile(DB_PATH, "utf-8");
+          const db = JSON.parse(data);
+          if (Array.isArray(db.servers)) {
+            db.servers = db.servers.map((s: any) => {
+              if (s.id === serverId) {
+                const existingImages = Array.isArray(s.images) ? s.images : [];
+                return { ...s, images: existingImages.filter((img: any) => img.id !== imageId) };
+              }
+              return s;
+            });
+            await fs.writeFile(DB_PATH, JSON.stringify(db, null, 2));
+            updatedServers = db.servers;
+          }
+        } catch (err) {
+          console.error("[IMG] Erro ao remover imagem de database.json:", err);
+        }
+      }
+
+      res.json({ success: true, servers: updatedServers });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "Erro ao deletar imagem" });
     }
   });
 

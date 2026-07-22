@@ -371,31 +371,31 @@ export default function ZabbixDashboard() {
     }
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !activeServerId) return;
 
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const dataUrl = event.target?.result as string;
-      if (!dataUrl) return;
+    setSaveStatus('saving');
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+      formData.append('serverId', activeServerId);
 
-      setSaveStatus('saving');
-      try {
-        // Envia a imagem para o servidor para ser salva na pasta /img
-        const uploadRes = await fetch('/api/upload-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: dataUrl, serverId: activeServerId })
-        });
+      const uploadRes = await fetch('/api/upload-image', {
+        method: 'POST',
+        body: formData
+      });
 
-        if (!uploadRes.ok) {
-          const errorData = await uploadRes.json().catch(() => ({}));
-          throw new Error(errorData.error || "Erro ao fazer upload da imagem");
-        }
+      if (!uploadRes.ok) {
+        const errorData = await uploadRes.json().catch(() => ({}));
+        throw new Error(errorData.error || "Erro ao fazer upload da imagem");
+      }
 
-        const uploadData = await uploadRes.json();
-        const savedUrl = uploadData.url; // caminho /img/img_...
+      const uploadData = await uploadRes.json();
+      if (uploadData.servers && Array.isArray(uploadData.servers) && uploadData.servers.length > 0) {
+        setServers(uploadData.servers);
+      } else {
+        const savedUrl = uploadData.url;
         const newImage: ServerImage = { id: uploadData.id || Date.now().toString(), url: savedUrl };
 
         const updated = servers.map(s => {
@@ -409,13 +409,15 @@ export default function ZabbixDashboard() {
         });
         setServers(updated);
         await saveServers(updated);
-      } catch (err) {
-        console.error("Erro no envio da imagem:", err);
-        setSaveStatus('error');
       }
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus(null), 3000);
+    } catch (err) {
+      console.error("Erro no envio da imagem:", err);
+      setSaveStatus('error');
+    } finally {
+      e.target.value = '';
+    }
   };
 
   const handleDeleteImage = async (imageId: string) => {
@@ -423,25 +425,44 @@ export default function ZabbixDashboard() {
     const targetServer = servers.find(s => s.id === activeServerId);
     const targetImage = targetServer?.images?.find(i => i.id === imageId);
 
-    if (targetImage && targetImage.url.startsWith('/img/')) {
-      fetch('/api/delete-image', {
+    setSaveStatus('saving');
+    try {
+      const res = await fetch('/api/delete-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: targetImage.url })
-      }).catch(() => {});
-    }
+        body: JSON.stringify({
+          url: targetImage?.url || '',
+          serverId: activeServerId,
+          imageId
+        })
+      });
 
-    const updated = servers.map(s => {
-      if (s.id === activeServerId) {
-        return {
-          ...s,
-          images: (s.images || []).filter(img => img.id !== imageId)
-        };
+      if (res.ok) {
+        const data = await res.json();
+        if (data.servers && Array.isArray(data.servers) && data.servers.length > 0) {
+          setServers(data.servers);
+        } else {
+          const updated = servers.map(s => {
+            if (s.id === activeServerId) {
+              return {
+                ...s,
+                images: (s.images || []).filter(img => img.id !== imageId)
+              };
+            }
+            return s;
+          });
+          setServers(updated);
+          await saveServers(updated);
+        }
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus(null), 3000);
+      } else {
+        setSaveStatus('error');
       }
-      return s;
-    });
-    setServers(updated);
-    await saveServers(updated);
+    } catch (err) {
+      console.error("Erro ao deletar imagem:", err);
+      setSaveStatus('error');
+    }
   };
 
   const handleSaveNoteText = async () => {
