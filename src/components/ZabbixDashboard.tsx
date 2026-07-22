@@ -371,56 +371,70 @@ export default function ZabbixDashboard() {
     }
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Save notes specifically for active server
+  const saveNotesOnly = async (serverId: string, noteText: string, notes: ServerNoteItem[]) => {
+    setSaveStatus('saving');
+    try {
+      const res = await fetch(`/api/servers/${serverId}/notes`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ noteText, notes })
+      });
+      if (res.ok) {
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus(null), 3000);
+      } else {
+        setSaveStatus('error');
+      }
+    } catch (e) {
+      console.error("Erro ao salvar anotações:", e);
+      setSaveStatus('error');
+    }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !activeServerId) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target?.result as string;
-      img.onload = async () => {
-        const canvas = document.createElement('canvas');
-        const maxDim = 2200;
-        let width = img.width;
-        let height = img.height;
-        if (width > maxDim || height > maxDim) {
-          if (width > height) {
-            height = Math.round((height * maxDim) / width);
-            width = maxDim;
-          } else {
-            width = Math.round((width * maxDim) / height);
-            height = maxDim;
-          }
+    setSaveStatus('saving');
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch(`/api/servers/${activeServerId}/images`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.image) {
+          setServers(prev => prev.map(s => {
+            if (s.id === activeServerId) {
+              return {
+                ...s,
+                images: [...(s.images || []), data.image]
+              };
+            }
+            return s;
+          }));
+          setSaveStatus('saved');
+          setTimeout(() => setSaveStatus(null), 3000);
         }
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
-
-        const newImage: ServerImage = { id: Date.now().toString(), url: dataUrl };
-        const updatedServers = servers.map(s => {
-          if (s.id === activeServerId) {
-            return {
-              ...s,
-              images: [...(s.images || []), newImage]
-            };
-          }
-          return s;
-        });
-
-        setServers(updatedServers);
-        await saveServers(updatedServers);
-      };
-    };
-    reader.readAsDataURL(file);
+      } else {
+        console.error("Erro ao fazer upload da imagem:", await res.text());
+        setSaveStatus('error');
+      }
+    } catch (err) {
+      console.error("Erro de rede ao enviar imagem:", err);
+      setSaveStatus('error');
+    }
     e.target.value = '';
   };
 
   const handleDeleteImage = async (imageId: string) => {
     if (!activeServerId) return;
-    const updatedServers = servers.map(s => {
+    setServers(prev => prev.map(s => {
       if (s.id === activeServerId) {
         return {
           ...s,
@@ -428,24 +442,30 @@ export default function ZabbixDashboard() {
         };
       }
       return s;
-    });
-    setServers(updatedServers);
-    await saveServers(updatedServers);
+    }));
+
+    try {
+      await fetch(`/api/servers/${activeServerId}/images/${imageId}`, {
+        method: 'DELETE'
+      });
+    } catch (e) {
+      console.error("Erro ao deletar imagem do servidor:", e);
+    }
   };
 
   const handleSaveNoteText = async () => {
     if (!activeServerId) return;
-    const updatedServers = servers.map(s => {
+    const currentServer = servers.find(s => s.id === activeServerId);
+    const updatedNotes = currentServer?.notes || [];
+
+    setServers(prev => prev.map(s => {
       if (s.id === activeServerId) {
-        return {
-          ...s,
-          noteText: noteTextDraft
-        };
+        return { ...s, noteText: noteTextDraft };
       }
       return s;
-    });
-    setServers(updatedServers);
-    await saveServers(updatedServers);
+    }));
+
+    await saveNotesOnly(activeServerId, noteTextDraft, updatedNotes);
     setIsEditingNote(false);
   };
 
@@ -453,59 +473,59 @@ export default function ZabbixDashboard() {
     e.preventDefault();
     if (!newCheckitemText.trim() || !activeServerId) return;
 
+    const currentServer = servers.find(s => s.id === activeServerId);
     const newItem: ServerNoteItem = {
       id: Date.now().toString(),
       text: newCheckitemText.trim(),
       completed: false
     };
 
-    const updatedServers = servers.map(s => {
+    const updatedNotes = [...(currentServer?.notes || []), newItem];
+
+    setServers(prev => prev.map(s => {
       if (s.id === activeServerId) {
-        return {
-          ...s,
-          noteText: noteTextDraft,
-          notes: [...(s.notes || []), newItem]
-        };
+        return { ...s, noteText: noteTextDraft, notes: updatedNotes };
       }
       return s;
-    });
+    }));
 
-    setServers(updatedServers);
-    await saveServers(updatedServers);
     setNewCheckitemText('');
+    await saveNotesOnly(activeServerId, noteTextDraft, updatedNotes);
   };
 
   const handleToggleChecklistItem = async (itemId: string) => {
     if (!activeServerId) return;
-    const updatedServers = servers.map(s => {
+    const currentServer = servers.find(s => s.id === activeServerId);
+    const updatedNotes = (currentServer?.notes || []).map(item => {
+      if (item.id === itemId) {
+        return { ...item, completed: !item.completed };
+      }
+      return item;
+    });
+
+    setServers(prev => prev.map(s => {
       if (s.id === activeServerId) {
-        const updatedNotes = (s.notes || []).map(item => {
-          if (item.id === itemId) {
-            return { ...item, completed: !item.completed };
-          }
-          return item;
-        });
         return { ...s, notes: updatedNotes };
       }
       return s;
-    });
-    setServers(updatedServers);
-    await saveServers(updatedServers);
+    }));
+
+    await saveNotesOnly(activeServerId, currentServer?.noteText || noteTextDraft, updatedNotes);
   };
 
   const handleDeleteChecklistItem = async (itemId: string) => {
     if (!activeServerId) return;
-    const updatedServers = servers.map(s => {
+    const currentServer = servers.find(s => s.id === activeServerId);
+    const updatedNotes = (currentServer?.notes || []).filter(item => item.id !== itemId);
+
+    setServers(prev => prev.map(s => {
       if (s.id === activeServerId) {
-        return {
-          ...s,
-          notes: (s.notes || []).filter(item => item.id !== itemId)
-        };
+        return { ...s, notes: updatedNotes };
       }
       return s;
-    });
-    setServers(updatedServers);
-    await saveServers(updatedServers);
+    }));
+
+    await saveNotesOnly(activeServerId, currentServer?.noteText || noteTextDraft, updatedNotes);
   };
 
 
