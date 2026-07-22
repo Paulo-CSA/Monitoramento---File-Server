@@ -11,12 +11,13 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DB_PATH = path.resolve(process.cwd(), "database.json");
+const IMG_DIR = path.resolve(process.cwd(), "img");
 const UPLOADS_DIR = path.resolve(process.cwd(), "uploads");
 
-// Helper para converter base64 em arquivo de imagem no disco
+// Helper para converter base64 em arquivo de imagem no disco na pasta /img
 async function processAndSaveBase64Image(dataUrl: string): Promise<string> {
   if (!dataUrl) return '';
-  if (dataUrl.startsWith('/uploads/') || dataUrl.startsWith('http://') || dataUrl.startsWith('https://')) {
+  if (dataUrl.startsWith('/img/') || dataUrl.startsWith('/uploads/') || dataUrl.startsWith('http://') || dataUrl.startsWith('https://')) {
     return dataUrl;
   }
   const matches = dataUrl.match(/^data:image\/([a-zA-Z0-9]+);base64,(.+)$/);
@@ -26,9 +27,9 @@ async function processAndSaveBase64Image(dataUrl: string): Promise<string> {
   const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
   const buffer = Buffer.from(matches[2], 'base64');
   const filename = `img-${Date.now()}-${Math.floor(Math.random() * 1000000)}.${ext}`;
-  const filepath = path.join(UPLOADS_DIR, filename);
+  const filepath = path.join(IMG_DIR, filename);
   await fs.writeFile(filepath, buffer);
-  return `/uploads/${filename}`;
+  return `/img/${filename}`;
 }
 
 async function startServer() {
@@ -39,9 +40,9 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-  // Configuração do Multer para upload de arquivos
+  // Configuração do Multer para upload de arquivos na pasta /img
   const storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, UPLOADS_DIR),
+    destination: (req, file, cb) => cb(null, IMG_DIR),
     filename: (req, file, cb) => {
       const ext = path.extname(file.originalname) || '.jpg';
       cb(null, `img-${Date.now()}-${Math.floor(Math.random() * 1000000)}${ext}`);
@@ -49,11 +50,12 @@ async function startServer() {
   });
   const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
 
-  // Garante que o database.json e a pasta uploads existem
+  // Garante que o database.json e as pastas /img e /uploads existem
   const initDatabase = async () => {
     try {
+      await fs.mkdir(IMG_DIR, { recursive: true });
       await fs.mkdir(UPLOADS_DIR, { recursive: true });
-      console.log(`[DB] Pasta de imagens pronta em: ${UPLOADS_DIR}`);
+      console.log(`[DB] Pasta de imagens /img pronta em: ${IMG_DIR}`);
 
       const exists = await fs.access(DB_PATH).then(() => true).catch(() => false);
       if (!exists) {
@@ -66,7 +68,7 @@ async function startServer() {
           if (!db.servers || !Array.isArray(db.servers)) {
              await fs.writeFile(DB_PATH, JSON.stringify({ servers: [] }, null, 2));
           } else {
-            // Migrar quaisquer imagens base64 antigas para arquivos locais no disco
+            // Migrar quaisquer imagens base64 antigas para a pasta /img
             let modified = false;
             for (const server of db.servers) {
               if (server.images && Array.isArray(server.images)) {
@@ -80,7 +82,7 @@ async function startServer() {
             }
             if (modified) {
               await fs.writeFile(DB_PATH, JSON.stringify(db, null, 2));
-              console.log("[DB] Imagens antigas convertidas para arquivos com sucesso!");
+              console.log("[DB] Imagens convertidas para a pasta /img com sucesso!");
             }
           }
           console.log(`[DB] Banco de dados carregado com sucesso.`);
@@ -96,7 +98,8 @@ async function startServer() {
 
   await initDatabase();
 
-  // Servir imagens enviadas como arquivos estáticos
+  // Servir imagens enviadas como arquivos estáticos através de /img e /uploads
+  app.use("/img", express.static(IMG_DIR));
   app.use("/uploads", express.static(UPLOADS_DIR));
 
   // Servers Persistence API
@@ -177,7 +180,7 @@ async function startServer() {
       let imageUrl = '';
 
       if (req.file) {
-        imageUrl = `/uploads/${req.file.filename}`;
+        imageUrl = `/img/${req.file.filename}`;
       } else if (req.body.imageBase64) {
         imageUrl = await processAndSaveBase64Image(req.body.imageBase64);
       } else {
@@ -234,11 +237,17 @@ async function startServer() {
         server.images = server.images.filter((img: any) => img.id !== imageId);
         await fs.writeFile(DB_PATH, JSON.stringify(db, null, 2));
 
-        // Apagar o arquivo do disco se estiver em /uploads/
-        if (imageToDelete.url && imageToDelete.url.startsWith('/uploads/')) {
-          const filename = path.basename(imageToDelete.url);
-          const filepath = path.join(UPLOADS_DIR, filename);
-          fs.unlink(filepath).catch(() => {});
+        // Apagar o arquivo do disco se estiver em /img/ ou /uploads/
+        if (imageToDelete.url) {
+          if (imageToDelete.url.startsWith('/img/')) {
+            const filename = path.basename(imageToDelete.url);
+            const filepath = path.join(IMG_DIR, filename);
+            fs.unlink(filepath).catch(() => {});
+          } else if (imageToDelete.url.startsWith('/uploads/')) {
+            const filename = path.basename(imageToDelete.url);
+            const filepath = path.join(UPLOADS_DIR, filename);
+            fs.unlink(filepath).catch(() => {});
+          }
         }
       }
 
