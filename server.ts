@@ -44,7 +44,7 @@ async function startServer() {
   const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, IMG_DIR),
     filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname) || '.jpg';
+      const ext = path.extname(file.originalname) || '.png';
       cb(null, `img-${Date.now()}-${Math.floor(Math.random() * 1000000)}${ext}`);
     }
   });

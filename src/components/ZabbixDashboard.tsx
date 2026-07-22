@@ -1203,7 +1203,7 @@ export default function ZabbixDashboard() {
                       <Upload className="w-3 h-3" /> Adicionar
                       <input 
                         type="file" 
-                        accept="image/*" 
+                        accept="image/png,image/*" 
                         className="hidden" 
                         onChange={handleImageUpload}
                       />
