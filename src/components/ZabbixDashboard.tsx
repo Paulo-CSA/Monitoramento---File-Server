@@ -1133,16 +1133,20 @@ export default function ZabbixDashboard() {
                     </label>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 max-h-[140px] overflow-y-auto custom-scrollbar p-0.5">
+                  <div className="grid grid-cols-2 gap-2 max-h-[200px] min-h-[150px] overflow-y-auto custom-scrollbar p-0.5 items-center justify-items-center">
                     {(activeServer?.images || []).map((img) => (
                       <div 
                         key={img.id} 
-                        className="relative group aspect-square bg-slate-900 rounded-md border border-slate-800 overflow-hidden cursor-pointer"
+                        className={`relative group bg-slate-900 rounded-md border border-slate-800 overflow-hidden cursor-pointer flex items-center justify-center p-1 transition-all ${
+                          (activeServer?.images || []).length === 1 
+                            ? 'col-span-2 w-36 h-36 mx-auto' 
+                            : 'w-full aspect-square'
+                        }`}
                       >
                         <img 
                           src={img.url} 
                           alt="Miniatura" 
-                          className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                          className="max-w-full max-h-full object-contain transition-transform group-hover:scale-105"
                           onClick={() => setSelectedFullImage(img.url)}
                         />
                         <div 
@@ -1156,7 +1160,7 @@ export default function ZabbixDashboard() {
                             e.stopPropagation();
                             handleDeleteImage(img.id);
                           }}
-                          className="absolute top-1 right-1 p-1 bg-rose-600/90 hover:bg-rose-500 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                          className="absolute top-1 right-1 p-1 bg-rose-600/90 hover:bg-rose-500 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity z-10 shadow"
                           title="Excluir Imagem"
                         >
                           <Trash2 className="w-3 h-3" />
@@ -1165,10 +1169,10 @@ export default function ZabbixDashboard() {
                     ))}
 
                     {(!activeServer?.images || activeServer.images.length === 0) && (
-                      <label className="col-span-2 border border-dashed border-slate-800/80 hover:border-blue-500/50 rounded-lg p-2.5 flex flex-col items-center justify-center gap-1 text-center cursor-pointer transition-colors min-h-[90px] bg-slate-900/40">
-                        <Upload className="w-4 h-4 text-slate-500" />
-                        <span className="text-[10px] text-slate-400 font-bold">Nenhuma imagem</span>
-                        <span className="text-[8px] text-blue-400 font-black uppercase tracking-wider">Clique p/ Upload</span>
+                      <label className="col-span-2 border border-dashed border-slate-800/80 hover:border-blue-500/50 rounded-lg p-3 flex flex-col items-center justify-center gap-1.5 text-center cursor-pointer transition-colors min-h-[140px] bg-slate-900/40">
+                        <Upload className="w-5 h-5 text-slate-500" />
+                        <span className="text-[11px] text-slate-400 font-bold">Nenhuma imagem</span>
+                        <span className="text-[9px] text-blue-400 font-black uppercase tracking-wider">Clique p/ Upload</span>
                         <input 
                           type="file" 
                           accept="image/*" 
@@ -1213,12 +1217,12 @@ export default function ZabbixDashboard() {
                   </div>
 
                   {isEditingNote ? (
-                    <div className="space-y-2 flex-1 flex flex-col">
+                    <div className="space-y-2 flex-1 flex flex-col min-h-[150px]">
                       <textarea 
                         value={noteTextDraft}
                         onChange={(e) => setNoteTextDraft(e.target.value)}
                         placeholder="Escreva anotações ou observações detalhadas do servidor..."
-                        className="w-full h-28 bg-slate-900 border border-slate-800 rounded p-2.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500 font-mono resize-y custom-scrollbar min-h-[80px]"
+                        className="w-full h-36 bg-slate-900 border border-slate-800 rounded p-2.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500 font-mono resize-y custom-scrollbar min-h-[100px]"
                       />
                       <form onSubmit={handleAddChecklistItem} className="flex gap-1.5">
                         <input 
@@ -1237,16 +1241,16 @@ export default function ZabbixDashboard() {
                       </form>
                     </div>
                   ) : (
-                    <div className="space-y-2 flex-1 flex flex-col">
-                      {/* Container com barra de rolagem para ver todo o texto das anotações */}
-                      <div className="max-h-36 overflow-y-auto custom-scrollbar bg-slate-900/70 p-3 rounded-lg border border-slate-800/80">
+                    <div className="space-y-2 flex-1 flex flex-col min-h-[150px]">
+                      {/* Container com barra de rolagem expandida para ver mais texto */}
+                      <div className="max-h-48 min-h-[80px] overflow-y-auto custom-scrollbar bg-slate-900/70 p-3 rounded-lg border border-slate-800/80">
                         <p className="text-xs text-slate-200 whitespace-pre-wrap font-mono leading-relaxed">
                           {activeServer?.noteText || "Nenhuma anotação cadastrada. Clique em Editar para adicionar."}
                         </p>
                       </div>
 
                       {(activeServer?.notes || []).length > 0 && (
-                        <div className="max-h-24 overflow-y-auto space-y-1 custom-scrollbar pr-1 mt-1">
+                        <div className="max-h-32 overflow-y-auto space-y-1 custom-scrollbar pr-1 mt-1">
                           {(activeServer?.notes || []).map((item) => (
                             <div key={item.id} className="flex items-center justify-between text-xs bg-slate-900/60 px-2.5 py-1 rounded border border-slate-800/50">
                               <button 
