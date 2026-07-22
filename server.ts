@@ -10,7 +10,60 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DB_PATH = path.resolve(process.cwd(), "database.json");
+const PUBLIC_UPLOADS = path.resolve(process.cwd(), "public/uploads");
 const UPLOADS_DIR = path.resolve(process.cwd(), "uploads");
+
+// Helper: salva string base64 em arquivo físico na pasta public/uploads/
+async function saveBase64ImageToDisk(base64Data: string): Promise<string> {
+  if (!base64Data || typeof base64Data !== 'string') return base64Data;
+  if (!base64Data.startsWith('data:image')) return base64Data;
+
+  const matches = base64Data.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+  let buffer: Buffer;
+  let extension = "jpg";
+
+  if (matches && matches.length === 3) {
+    buffer = Buffer.from(matches[2], "base64");
+    if (matches[1].includes("png")) extension = "png";
+    if (matches[1].includes("webp")) extension = "webp";
+  } else {
+    buffer = Buffer.from(base64Data, "base64");
+  }
+
+  const filename = `img_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${extension}`;
+  
+  await fs.mkdir(PUBLIC_UPLOADS, { recursive: true }).catch(() => {});
+  await fs.mkdir(UPLOADS_DIR, { recursive: true }).catch(() => {});
+
+  await fs.writeFile(path.join(PUBLIC_UPLOADS, filename), buffer);
+  await fs.writeFile(path.join(UPLOADS_DIR, filename), buffer).catch(() => {});
+
+  console.log(`[Disk Storage] Salva imagem base64 convertida em /uploads/${filename}`);
+  return `/uploads/${filename}`;
+}
+
+// Helper: garante que nenhum objeto de servidor mantenha strings Base64 gigantes no banco
+async function sanitizeServerImages(servers: any[]): Promise<any[]> {
+  if (!Array.isArray(servers)) return [];
+  const cleanServers = [];
+  for (const server of servers) {
+    const cleanServer = { ...server };
+    if (Array.isArray(cleanServer.images)) {
+      const cleanImages = [];
+      for (const img of cleanServer.images) {
+        if (img && img.url && img.url.startsWith('data:image')) {
+          const newUrl = await saveBase64ImageToDisk(img.url);
+          cleanImages.push({ ...img, url: newUrl });
+        } else {
+          cleanImages.push(img);
+        }
+      }
+      cleanServer.images = cleanImages;
+    }
+    cleanServers.push(cleanServer);
+  }
+  return cleanServers;
+}
 
 async function startServer() {
   const app = express();
@@ -20,8 +73,14 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-  // Garante diretório de uploads
+  // Garante diretórios de uploads e provê rotas estáticas
+  await fs.mkdir(PUBLIC_UPLOADS, { recursive: true }).catch(() => {});
   await fs.mkdir(UPLOADS_DIR, { recursive: true }).catch(() => {});
+  
+  app.use("/public/uploads", express.static(PUBLIC_UPLOADS));
+  app.use("/uploads", express.static(PUBLIC_UPLOADS));
+  app.use("/uploads", express.static(UPLOADS_DIR));
+  app.use("/api/uploads", express.static(PUBLIC_UPLOADS));
   app.use("/api/uploads", express.static(UPLOADS_DIR));
 
   // Garante que o database.json existe e é válido antes de prosseguir
@@ -35,11 +94,15 @@ async function startServer() {
       } else {
         const content = await fs.readFile(DB_PATH, "utf-8");
         try {
-          const db = JSON.parse(content);
+          let db = JSON.parse(content);
           if (!db.servers || !Array.isArray(db.servers)) {
-             console.log("[DB] Formato inválido, corrigindo...");
-             await fs.writeFile(DB_PATH, JSON.stringify({ servers: [] }, null, 2));
+            console.log("[DB] Formato inválido, corrigindo...");
+            db = { servers: [] };
+          } else {
+            // Migra/limpa imagens base64 antigas para arquivos físicos
+            db.servers = await sanitizeServerImages(db.servers);
           }
+          await fs.writeFile(DB_PATH, JSON.stringify(db, null, 2));
           console.log(`[DB] Sucesso: ${db.servers?.length || 0} servidores carregados.`);
         } catch (e) {
           console.error("[DB] Arquivo corrompido, resetando...");
@@ -72,8 +135,9 @@ async function startServer() {
       if (!Array.isArray(servers)) {
         return res.status(400).json({ error: "Invalid data format: 'servers' must be an array" });
       }
-      await fs.writeFile(DB_PATH, JSON.stringify({ servers }, null, 2));
-      console.log(`Saved ${servers.length} servers to database.json`);
+      const cleanServers = await sanitizeServerImages(servers);
+      await fs.writeFile(DB_PATH, JSON.stringify({ servers: cleanServers }, null, 2));
+      console.log(`Saved ${cleanServers.length} servers to database.json`);
       res.json({ success: true });
     } catch (error) {
       console.error("Failed to save to database:", error);
@@ -81,36 +145,27 @@ async function startServer() {
     }
   });
 
-  // Image Upload API
-  app.post("/api/upload", async (req, res) => {
+  // Image Upload API (Suporta tanto envio binário quanto Base64)
+  app.post("/api/upload", express.raw({ type: ["image/*", "application/octet-stream"], limit: "50mb" }), async (req, res) => {
     try {
-      const { imageData } = req.body;
-      if (!imageData || typeof imageData !== "string") {
-        return res.status(400).json({ error: "No imageData provided" });
+      if (Buffer.isBuffer(req.body) && req.body.length > 0) {
+        const filename = `img_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.jpg`;
+        await fs.writeFile(path.join(PUBLIC_UPLOADS, filename), req.body);
+        await fs.writeFile(path.join(UPLOADS_DIR, filename), req.body).catch(() => {});
+        console.log(`[Upload Direct Binary] Imagem salva: ${filename}`);
+        return res.json({ success: true, url: `/uploads/${filename}` });
       }
 
-      const matches = imageData.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-      let buffer: Buffer;
-      let extension = "jpg";
-
-      if (matches && matches.length === 3) {
-        buffer = Buffer.from(matches[2], "base64");
-        if (matches[1].includes("png")) extension = "png";
-        if (matches[1].includes("webp")) extension = "webp";
-      } else {
-        buffer = Buffer.from(imageData, "base64");
+      const { imageData } = req.body || {};
+      if (imageData && typeof imageData === "string") {
+        const url = await saveBase64ImageToDisk(imageData);
+        return res.json({ success: true, url });
       }
 
-      const filename = `img_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${extension}`;
-      const filePath = path.join(UPLOADS_DIR, filename);
-
-      await fs.writeFile(filePath, buffer);
-      console.log(`[Upload] Imagem salva no disco: ${filename}`);
-
-      res.json({ success: true, url: `/api/uploads/${filename}` });
+      res.status(400).json({ error: "Formato de imagem inválido" });
     } catch (error) {
-      console.error("[Upload] Erro ao salvar arquivo:", error);
-      res.status(500).json({ error: "Failed to save upload image" });
+      console.error("[Upload Error]", error);
+      res.status(500).json({ error: "Falha ao salvar imagem no servidor" });
     }
   });
 
@@ -118,8 +173,8 @@ async function startServer() {
     try {
       const { filename } = req.params;
       const safeFilename = path.basename(filename);
-      const filePath = path.join(UPLOADS_DIR, safeFilename);
-      await fs.unlink(filePath).catch(() => {});
+      await fs.unlink(path.join(PUBLIC_UPLOADS, safeFilename)).catch(() => {});
+      await fs.unlink(path.join(UPLOADS_DIR, safeFilename)).catch(() => {});
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to delete file" });

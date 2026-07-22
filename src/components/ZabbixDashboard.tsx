@@ -402,33 +402,61 @@ export default function ZabbixDashboard() {
           const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
 
           // Upload image to backend server disk storage
-          const uploadRes = await fetch('/api/upload', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ imageData: dataUrl })
-          });
+          canvas.toBlob(async (blob) => {
+            try {
+              let imageUrl = '';
+              if (blob) {
+                const uploadRes = await fetch('/api/upload', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'image/jpeg' },
+                  body: blob
+                });
+                if (uploadRes.ok) {
+                  const uploadJson = await uploadRes.json();
+                  if (uploadJson.url) {
+                    imageUrl = uploadJson.url;
+                  }
+                }
+              }
 
-          let imageUrl = dataUrl;
-          if (uploadRes.ok) {
-            const uploadJson = await uploadRes.json();
-            if (uploadJson.url) {
-              imageUrl = uploadJson.url;
+              // Fallback para envio JSON se blob falhar
+              if (!imageUrl) {
+                const uploadRes = await fetch('/api/upload', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ imageData: dataUrl })
+                });
+                if (uploadRes.ok) {
+                  const uploadJson = await uploadRes.json();
+                  imageUrl = uploadJson.url || '';
+                }
+              }
+
+              if (!imageUrl) {
+                console.error("Não foi possível salvar a imagem no servidor");
+                setSaveStatus('error');
+                return;
+              }
+
+              console.log("Imagem salva no disco do servidor:", imageUrl);
+              const newImage: ServerImage = { id: Date.now().toString(), url: imageUrl };
+              const updatedServers = servers.map(s => {
+                if (s.id === activeServerId) {
+                  return {
+                    ...s,
+                    images: [...(s.images || []), newImage]
+                  };
+                }
+                return s;
+              });
+
+              setServers(updatedServers);
+              await saveServers(updatedServers);
+            } catch (err) {
+              console.error("Erro ao enviar imagem:", err);
+              setSaveStatus('error');
             }
-          }
-
-          const newImage: ServerImage = { id: Date.now().toString(), url: imageUrl };
-          const updatedServers = servers.map(s => {
-            if (s.id === activeServerId) {
-              return {
-                ...s,
-                images: [...(s.images || []), newImage]
-              };
-            }
-            return s;
-          });
-
-          setServers(updatedServers);
-          await saveServers(updatedServers);
+          }, 'image/jpeg', 0.85);
         } catch (err) {
           console.error("Erro ao processar e salvar imagem:", err);
           setSaveStatus('error');
@@ -444,9 +472,11 @@ export default function ZabbixDashboard() {
     const currentServer = servers.find(s => s.id === activeServerId);
     const targetImage = currentServer?.images?.find(i => i.id === imageId);
 
-    if (targetImage && targetImage.url.startsWith('/api/uploads/')) {
-      const filename = targetImage.url.replace('/api/uploads/', '');
-      fetch(`/api/upload/${filename}`, { method: 'DELETE' }).catch(() => {});
+    if (targetImage && targetImage.url) {
+      const filename = targetImage.url.split('/').pop();
+      if (filename && filename.startsWith('img_')) {
+        fetch(`/api/upload/${filename}`, { method: 'DELETE' }).catch(() => {});
+      }
     }
 
     const updatedServers = servers.map(s => {
