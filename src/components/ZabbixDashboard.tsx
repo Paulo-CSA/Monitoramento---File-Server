@@ -85,6 +85,7 @@ export default function ZabbixDashboard() {
   const [isEditingNote, setIsEditingNote] = useState(false);
   const [noteTextDraft, setNoteTextDraft] = useState('');
   const [newCheckitemText, setNewCheckitemText] = useState('');
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error' | null>(null);
 
   useEffect(() => {
     const server = servers.find(s => s.id === activeServerId);
@@ -93,7 +94,7 @@ export default function ZabbixDashboard() {
     }
   }, [activeServerId, servers]);
 
-  // Initial fetch from backend
+  // Initial fetch from backend with fallback
   useEffect(() => {
     const initServers = async () => {
       console.log("Iniciando busca de servidores no backend...");
@@ -104,18 +105,46 @@ export default function ZabbixDashboard() {
         const data = await res.json();
         console.log("Servidores recuperados do database.json:", data);
         
-        if (data && data.servers && Array.isArray(data.servers)) {
-          setServers(data.servers);
-          if (data.servers.length > 0) {
-            setActiveServerId(data.servers[0].id);
-          } else {
-            setLoading(false);
+        let loadedServers: FileServer[] = [];
+        if (data && data.servers && Array.isArray(data.servers) && data.servers.length > 0) {
+          loadedServers = data.servers;
+        } else {
+          // Fallback to localStorage if server database is empty
+          const backup = localStorage.getItem('zabbix_servers_backup');
+          if (backup) {
+            try {
+              const parsed = JSON.parse(backup);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                loadedServers = parsed;
+                // Sync backup back to server database
+                await fetch('/api/servers', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ servers: parsed })
+                });
+              }
+            } catch (e) {}
           }
+        }
+
+        if (loadedServers.length > 0) {
+          setServers(loadedServers);
+          setActiveServerId(prev => prev || loadedServers[0].id);
         } else {
           setLoading(false);
         }
       } catch (err) {
         console.error("Erro ao carregar servidores do backend:", err);
+        const backup = localStorage.getItem('zabbix_servers_backup');
+        if (backup) {
+          try {
+            const parsed = JSON.parse(backup);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setServers(parsed);
+              setActiveServerId(prev => prev || parsed[0].id);
+            }
+          } catch(e) {}
+        }
         setLoading(false);
       }
     };
@@ -123,14 +152,31 @@ export default function ZabbixDashboard() {
   }, []);
 
   const saveServers = async (updatedServers: FileServer[]) => {
+    setSaveStatus('saving');
     try {
-      await fetch('/api/servers', {
+      const res = await fetch('/api/servers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ servers: updatedServers })
       });
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error("Erro ao salvar servidores no servidor:", res.status, errText);
+        setSaveStatus('error');
+      } else {
+        console.log("Servidores salvos com sucesso no servidor (database.json)!");
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus(null), 3000);
+      }
     } catch (err) {
-      console.error("Failed to save servers to backend", err);
+      console.error("Falha de rede ao salvar servidores no backend", err);
+      setSaveStatus('error');
+    }
+
+    try {
+      localStorage.setItem('zabbix_servers_backup', JSON.stringify(updatedServers));
+    } catch (e) {
+      console.warn("Nao foi possivel salvar no localStorage backup", e);
     }
   };
 
@@ -333,9 +379,9 @@ export default function ZabbixDashboard() {
     reader.onload = (event) => {
       const img = new Image();
       img.src = event.target?.result as string;
-      img.onload = () => {
+      img.onload = async () => {
         const canvas = document.createElement('canvas');
-        const maxDim = 3000;
+        const maxDim = 2200;
         let width = img.width;
         let height = img.height;
         if (width > maxDim || height > maxDim) {
@@ -351,7 +397,7 @@ export default function ZabbixDashboard() {
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         ctx?.drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
 
         const newImage: ServerImage = { id: Date.now().toString(), url: dataUrl };
         const updatedServers = servers.map(s => {
@@ -365,7 +411,7 @@ export default function ZabbixDashboard() {
         });
 
         setServers(updatedServers);
-        saveServers(updatedServers);
+        await saveServers(updatedServers);
       };
     };
     reader.readAsDataURL(file);
@@ -417,6 +463,7 @@ export default function ZabbixDashboard() {
       if (s.id === activeServerId) {
         return {
           ...s,
+          noteText: noteTextDraft,
           notes: [...(s.notes || []), newItem]
         };
       }
@@ -1206,6 +1253,21 @@ export default function ZabbixDashboard() {
                   <div className="flex justify-between items-center mb-2.5">
                     <span className="text-[11px] font-black uppercase text-slate-300 flex items-center gap-1.5 whitespace-nowrap">
                       <FileText className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" /> Bloco de Anotações & Observações
+                      {saveStatus === 'saving' && (
+                        <span className="text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-1.5 py-0.5 rounded flex items-center gap-1 font-mono font-bold animate-pulse ml-1.5">
+                          <RotateCcw className="w-2.5 h-2.5 animate-spin" /> Salvando...
+                        </span>
+                      )}
+                      {saveStatus === 'saved' && (
+                        <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.5 rounded flex items-center gap-1 font-mono font-bold ml-1.5">
+                          <Save className="w-2.5 h-2.5 text-emerald-400" /> Salvo no Servidor
+                        </span>
+                      )}
+                      {saveStatus === 'error' && (
+                        <span className="text-[9px] bg-rose-500/20 text-rose-300 border border-rose-500/40 px-1.5 py-0.5 rounded flex items-center gap-1 font-mono font-bold ml-1.5">
+                          ⚠ Erro ao Salvar
+                        </span>
+                      )}
                     </span>
                     <div className="flex items-center gap-1 flex-shrink-0">
                       {!isEditingNote ? (

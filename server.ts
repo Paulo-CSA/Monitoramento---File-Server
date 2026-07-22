@@ -16,7 +16,8 @@ async function startServer() {
   
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: "50mb" }));
+  app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
   // Garante que o database.json existe e é válido antes de prosseguir
   const initDatabase = async () => {
