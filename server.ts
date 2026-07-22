@@ -10,6 +10,37 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DB_PATH = path.resolve(process.cwd(), "database.json");
+const IMG_DIR = path.resolve(process.cwd(), "img");
+
+async function processAndSaveBase64Images(servers: any[]) {
+  if (!Array.isArray(servers)) return servers;
+  try {
+    await fs.mkdir(IMG_DIR, { recursive: true });
+    for (const server of servers) {
+      if (Array.isArray(server.images)) {
+        for (const img of server.images) {
+          if (img && typeof img.url === "string" && img.url.startsWith("data:image/")) {
+            const matches = img.url.match(/^data:image\/([a-zA-Z0-9\+\-]+);base64,(.+)$/);
+            if (matches) {
+              const rawType = matches[1].toLowerCase();
+              const ext = rawType === "jpeg" ? "jpg" : (rawType === "svg+xml" ? "svg" : rawType);
+              const base64Data = matches[2];
+              const buffer = Buffer.from(base64Data, "base64");
+              const filename = `img_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
+              const filePath = path.join(IMG_DIR, filename);
+              await fs.writeFile(filePath, buffer);
+              img.url = `/img/${filename}`;
+              console.log(`[IMG] Convertido base64 para arquivo de imagem: ${img.url}`);
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[IMG] Erro ao processar imagens base64:", err);
+  }
+  return servers;
+}
 
 async function startServer() {
   const app = express();
@@ -19,9 +50,13 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-  // Garante que o database.json existe e é válido antes de prosseguir
+  // Serve static files from /img directory
+  app.use("/img", express.static(IMG_DIR));
+
+  // Garante que a pasta /img e o database.json existem e são válidos
   const initDatabase = async () => {
     try {
+      await fs.mkdir(IMG_DIR, { recursive: true });
       console.log(`[DB] Verificando banco de dados em: ${DB_PATH}`);
       const exists = await fs.access(DB_PATH).then(() => true).catch(() => false);
       if (!exists) {
@@ -34,6 +69,10 @@ async function startServer() {
           if (!db.servers || !Array.isArray(db.servers)) {
              console.log("[DB] Formato inválido, corrigindo...");
              await fs.writeFile(DB_PATH, JSON.stringify({ servers: [] }, null, 2));
+          } else {
+             // Process any existing base64 images to save into /img folder
+             const cleanedServers = await processAndSaveBase64Images(db.servers);
+             await fs.writeFile(DB_PATH, JSON.stringify({ servers: cleanedServers }, null, 2));
           }
           console.log(`[DB] Sucesso: ${db.servers?.length || 0} servidores carregados.`);
         } catch (e) {
@@ -47,6 +86,60 @@ async function startServer() {
   };
 
   await initDatabase();
+
+  // Upload Image Endpoint
+  app.post("/api/upload-image", async (req, res) => {
+    try {
+      const { image } = req.body;
+      if (!image || typeof image !== "string") {
+        return res.status(400).json({ error: "Nenhuma imagem enviada" });
+      }
+
+      if (image.startsWith("/img/")) {
+        return res.json({ success: true, url: image, id: Date.now().toString() });
+      }
+
+      const matches = image.match(/^data:image\/([a-zA-Z0-9\+\-]+);base64,(.+)$/);
+      if (!matches) {
+        return res.status(400).json({ error: "Formato de imagem base64 inválido" });
+      }
+
+      const rawType = matches[1].toLowerCase();
+      const ext = rawType === "jpeg" ? "jpg" : (rawType === "svg+xml" ? "svg" : rawType);
+      const base64Data = matches[2];
+      const buffer = Buffer.from(base64Data, "base64");
+
+      await fs.mkdir(IMG_DIR, { recursive: true });
+
+      const filename = `img_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
+      const filePath = path.join(IMG_DIR, filename);
+
+      await fs.writeFile(filePath, buffer);
+      const imageUrl = `/img/${filename}`;
+
+      console.log(`[IMG] Imagem salva no disco: ${filePath}`);
+      return res.json({ success: true, url: imageUrl, id: Date.now().toString() });
+    } catch (error: any) {
+      console.error("[IMG] Erro ao salvar imagem:", error);
+      return res.status(500).json({ error: "Erro interno ao salvar imagem no servidor" });
+    }
+  });
+
+  // Delete Image Endpoint
+  app.post("/api/delete-image", async (req, res) => {
+    try {
+      const { url } = req.body;
+      if (url && typeof url === "string" && url.startsWith("/img/")) {
+        const filename = path.basename(url);
+        const filePath = path.join(IMG_DIR, filename);
+        await fs.unlink(filePath).catch(() => {});
+        console.log(`[IMG] Imagem apagada do disco: ${filePath}`);
+      }
+      res.json({ success: true });
+    } catch (e) {
+      res.json({ success: true });
+    }
+  });
 
   // Servers Persistence API
   app.get("/api/servers", async (req, res) => {
@@ -63,10 +156,11 @@ async function startServer() {
 
   app.post("/api/servers", async (req, res) => {
     try {
-      const { servers } = req.body;
+      let { servers } = req.body;
       if (!Array.isArray(servers)) {
         return res.status(400).json({ error: "Invalid data format: 'servers' must be an array" });
       }
+      servers = await processAndSaveBase64Images(servers);
       await fs.writeFile(DB_PATH, JSON.stringify({ servers }, null, 2));
       console.log(`Saved ${servers.length} servers to database.json`);
       res.json({ success: true });

@@ -88,11 +88,13 @@ export default function ZabbixDashboard() {
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error' | null>(null);
 
   useEffect(() => {
-    const server = servers.find(s => s.id === activeServerId);
-    if (server) {
-      setNoteTextDraft(server.noteText || '');
+    if (!isEditingNote) {
+      const server = servers.find(s => s.id === activeServerId);
+      if (server) {
+        setNoteTextDraft(server.noteText || '');
+      }
     }
-  }, [activeServerId, servers]);
+  }, [activeServerId, isEditingNote]);
 
   // Initial fetch from backend with fallback
   useEffect(() => {
@@ -375,6 +377,8 @@ export default function ZabbixDashboard() {
     const file = e.target.files?.[0];
     if (!file || !activeServerId) return;
 
+    const isPng = file.type === 'image/png' || file.name.toLowerCase().endsWith('.png');
+
     const reader = new FileReader();
     reader.onload = (event) => {
       const img = new Image();
@@ -397,21 +401,41 @@ export default function ZabbixDashboard() {
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         ctx?.drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
 
-        const newImage: ServerImage = { id: Date.now().toString(), url: dataUrl };
-        const updatedServers = servers.map(s => {
-          if (s.id === activeServerId) {
-            return {
-              ...s,
-              images: [...(s.images || []), newImage]
-            };
-          }
-          return s;
-        });
+        const mimeType = isPng ? 'image/png' : 'image/jpeg';
+        const dataUrl = canvas.toDataURL(mimeType, isPng ? undefined : 0.88);
 
-        setServers(updatedServers);
-        await saveServers(updatedServers);
+        setSaveStatus('saving');
+        try {
+          // Envia a imagem para o servidor para ser salva na pasta /img
+          const uploadRes = await fetch('/api/upload-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: dataUrl, serverId: activeServerId })
+          });
+
+          if (!uploadRes.ok) throw new Error("Erro ao fazer upload da imagem");
+
+          const uploadData = await uploadRes.json();
+          const savedUrl = uploadData.url; // caminho /img/img_...jpg
+          const newImage: ServerImage = { id: uploadData.id || Date.now().toString(), url: savedUrl };
+
+          const updatedServers = servers.map(s => {
+            if (s.id === activeServerId) {
+              return {
+                ...s,
+                images: [...(s.images || []), newImage]
+              };
+            }
+            return s;
+          });
+
+          setServers(updatedServers);
+          await saveServers(updatedServers);
+        } catch (err) {
+          console.error("Erro no envio da imagem:", err);
+          setSaveStatus('error');
+        }
       };
     };
     reader.readAsDataURL(file);
@@ -420,6 +444,17 @@ export default function ZabbixDashboard() {
 
   const handleDeleteImage = async (imageId: string) => {
     if (!activeServerId) return;
+    const targetServer = servers.find(s => s.id === activeServerId);
+    const targetImage = targetServer?.images?.find(i => i.id === imageId);
+
+    if (targetImage && targetImage.url.startsWith('/img/')) {
+      fetch('/api/delete-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: targetImage.url })
+      }).catch(() => {});
+    }
+
     const updatedServers = servers.map(s => {
       if (s.id === activeServerId) {
         return {
