@@ -90,11 +90,9 @@ export default function ZabbixDashboard() {
   useEffect(() => {
     if (!isEditingNote) {
       const server = servers.find(s => s.id === activeServerId);
-      if (server) {
-        setNoteTextDraft(server.noteText || '');
-      }
+      setNoteTextDraft(server?.noteText || '');
     }
-  }, [activeServerId, isEditingNote]);
+  }, [activeServerId, isEditingNote, servers]);
 
   // Initial fetch from backend with fallback
   useEffect(() => {
@@ -400,9 +398,8 @@ export default function ZabbixDashboard() {
         const savedUrl = uploadData.url; // caminho /img/img_...
         const newImage: ServerImage = { id: uploadData.id || Date.now().toString(), url: savedUrl };
 
-        let latestServers: FileServer[] = [];
         setServers(prevServers => {
-          latestServers = prevServers.map(s => {
+          const updated = prevServers.map(s => {
             if (s.id === activeServerId) {
               return {
                 ...s,
@@ -411,12 +408,9 @@ export default function ZabbixDashboard() {
             }
             return s;
           });
-          return latestServers;
+          saveServers(updated);
+          return updated;
         });
-
-        if (latestServers.length > 0) {
-          await saveServers(latestServers);
-        }
       } catch (err) {
         console.error("Erro no envio da imagem:", err);
         setSaveStatus('error');
@@ -439,9 +433,8 @@ export default function ZabbixDashboard() {
       }).catch(() => {});
     }
 
-    let latestServers: FileServer[] = [];
     setServers(prevServers => {
-      latestServers = prevServers.map(s => {
+      const updated = prevServers.map(s => {
         if (s.id === activeServerId) {
           return {
             ...s,
@@ -450,19 +443,15 @@ export default function ZabbixDashboard() {
         }
         return s;
       });
-      return latestServers;
+      saveServers(updated);
+      return updated;
     });
-
-    if (latestServers.length > 0) {
-      await saveServers(latestServers);
-    }
   };
 
   const handleSaveNoteText = async () => {
     if (!activeServerId) return;
-    let latestServers: FileServer[] = [];
     setServers(prevServers => {
-      latestServers = prevServers.map(s => {
+      const updated = prevServers.map(s => {
         if (s.id === activeServerId) {
           return {
             ...s,
@@ -471,12 +460,9 @@ export default function ZabbixDashboard() {
         }
         return s;
       });
-      return latestServers;
+      saveServers(updated);
+      return updated;
     });
-
-    if (latestServers.length > 0) {
-      await saveServers(latestServers);
-    }
     setIsEditingNote(false);
   };
 
@@ -490,9 +476,8 @@ export default function ZabbixDashboard() {
       completed: false
     };
 
-    let latestServers: FileServer[] = [];
     setServers(prevServers => {
-      latestServers = prevServers.map(s => {
+      const updated = prevServers.map(s => {
         if (s.id === activeServerId) {
           return {
             ...s,
@@ -502,20 +487,16 @@ export default function ZabbixDashboard() {
         }
         return s;
       });
-      return latestServers;
+      saveServers(updated);
+      return updated;
     });
-
-    if (latestServers.length > 0) {
-      await saveServers(latestServers);
-    }
     setNewCheckitemText('');
   };
 
   const handleToggleChecklistItem = async (itemId: string) => {
     if (!activeServerId) return;
-    let latestServers: FileServer[] = [];
     setServers(prevServers => {
-      latestServers = prevServers.map(s => {
+      const updated = prevServers.map(s => {
         if (s.id === activeServerId) {
           const updatedNotes = (s.notes || []).map(item => {
             if (item.id === itemId) {
@@ -527,19 +508,15 @@ export default function ZabbixDashboard() {
         }
         return s;
       });
-      return latestServers;
+      saveServers(updated);
+      return updated;
     });
-
-    if (latestServers.length > 0) {
-      await saveServers(latestServers);
-    }
   };
 
   const handleDeleteChecklistItem = async (itemId: string) => {
     if (!activeServerId) return;
-    let latestServers: FileServer[] = [];
     setServers(prevServers => {
-      latestServers = prevServers.map(s => {
+      const updated = prevServers.map(s => {
         if (s.id === activeServerId) {
           return {
             ...s,
@@ -548,12 +525,9 @@ export default function ZabbixDashboard() {
         }
         return s;
       });
-      return latestServers;
+      saveServers(updated);
+      return updated;
     });
-
-    if (latestServers.length > 0) {
-      await saveServers(latestServers);
-    }
   };
 
 
