@@ -10,6 +10,7 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DB_PATH = path.resolve(process.cwd(), "database.json");
+const UPLOADS_DIR = path.resolve(process.cwd(), "uploads");
 
 async function startServer() {
   const app = express();
@@ -18,6 +19,10 @@ async function startServer() {
 
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+
+  // Garante diretório de uploads
+  await fs.mkdir(UPLOADS_DIR, { recursive: true }).catch(() => {});
+  app.use("/api/uploads", express.static(UPLOADS_DIR));
 
   // Garante que o database.json existe e é válido antes de prosseguir
   const initDatabase = async () => {
@@ -73,6 +78,51 @@ async function startServer() {
     } catch (error) {
       console.error("Failed to save to database:", error);
       res.status(500).json({ error: "Failed to save to database" });
+    }
+  });
+
+  // Image Upload API
+  app.post("/api/upload", async (req, res) => {
+    try {
+      const { imageData } = req.body;
+      if (!imageData || typeof imageData !== "string") {
+        return res.status(400).json({ error: "No imageData provided" });
+      }
+
+      const matches = imageData.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+      let buffer: Buffer;
+      let extension = "jpg";
+
+      if (matches && matches.length === 3) {
+        buffer = Buffer.from(matches[2], "base64");
+        if (matches[1].includes("png")) extension = "png";
+        if (matches[1].includes("webp")) extension = "webp";
+      } else {
+        buffer = Buffer.from(imageData, "base64");
+      }
+
+      const filename = `img_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${extension}`;
+      const filePath = path.join(UPLOADS_DIR, filename);
+
+      await fs.writeFile(filePath, buffer);
+      console.log(`[Upload] Imagem salva no disco: ${filename}`);
+
+      res.json({ success: true, url: `/api/uploads/${filename}` });
+    } catch (error) {
+      console.error("[Upload] Erro ao salvar arquivo:", error);
+      res.status(500).json({ error: "Failed to save upload image" });
+    }
+  });
+
+  app.delete("/api/upload/:filename", async (req, res) => {
+    try {
+      const { filename } = req.params;
+      const safeFilename = path.basename(filename);
+      const filePath = path.join(UPLOADS_DIR, safeFilename);
+      await fs.unlink(filePath).catch(() => {});
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete file" });
     }
   });
 
