@@ -10,12 +10,24 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DB_PATH = path.resolve(process.cwd(), "database.json");
-const IMG_DIR = path.resolve(process.cwd(), "img");
+const ROOT_IMG_DIR = path.resolve(process.cwd(), "img");
+const PUBLIC_IMG_DIR = path.resolve(process.cwd(), "public", "img");
+
+async function ensureImgDirs() {
+  await fs.mkdir(ROOT_IMG_DIR, { recursive: true }).catch(() => {});
+  await fs.mkdir(PUBLIC_IMG_DIR, { recursive: true }).catch(() => {});
+}
+
+async function saveBufferToImg(filename: string, buffer: Buffer) {
+  await ensureImgDirs();
+  await fs.writeFile(path.join(ROOT_IMG_DIR, filename), buffer);
+  await fs.writeFile(path.join(PUBLIC_IMG_DIR, filename), buffer);
+}
 
 async function processAndSaveBase64Images(servers: any[]) {
   if (!Array.isArray(servers)) return servers;
   try {
-    await fs.mkdir(IMG_DIR, { recursive: true });
+    await ensureImgDirs();
     for (const server of servers) {
       if (Array.isArray(server.images)) {
         for (const img of server.images) {
@@ -38,8 +50,7 @@ async function processAndSaveBase64Images(servers: any[]) {
 
               const buffer = Buffer.from(base64Data, "base64");
               const filename = `img_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
-              const filePath = path.join(IMG_DIR, filename);
-              await fs.writeFile(filePath, buffer);
+              await saveBufferToImg(filename, buffer);
               img.url = `/img/${filename}`;
               console.log(`[IMG] Base64 salvo em /img: ${img.url}`);
             }
@@ -61,13 +72,14 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-  // Serve static files from /img directory
-  app.use("/img", express.static(IMG_DIR));
+  // Serve static files from both /public/img and /img directories
+  app.use("/img", express.static(PUBLIC_IMG_DIR));
+  app.use("/img", express.static(ROOT_IMG_DIR));
 
-  // Garante que a pasta /img e o database.json existem e são válidos
+  // Garante que as pastas de imagem e o database.json existem e são válidos
   const initDatabase = async () => {
     try {
-      await fs.mkdir(IMG_DIR, { recursive: true });
+      await ensureImgDirs();
       console.log(`[DB] Verificando banco de dados em: ${DB_PATH}`);
       const exists = await fs.access(DB_PATH).then(() => true).catch(() => false);
       if (!exists) {
@@ -130,16 +142,12 @@ async function startServer() {
       }
 
       const buffer = Buffer.from(base64Data, "base64");
-
-      await fs.mkdir(IMG_DIR, { recursive: true });
-
       const filename = `img_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
-      const filePath = path.join(IMG_DIR, filename);
 
-      await fs.writeFile(filePath, buffer);
+      await saveBufferToImg(filename, buffer);
       const imageUrl = `/img/${filename}`;
 
-      console.log(`[IMG] Imagem salva no disco em /img: ${filePath}`);
+      console.log(`[IMG] Imagem salva no disco em /img e /public/img: ${imageUrl}`);
       return res.json({ success: true, url: imageUrl, id: Date.now().toString() });
     } catch (error: any) {
       console.error("[IMG] Erro ao salvar imagem:", error);
@@ -153,9 +161,9 @@ async function startServer() {
       const { url } = req.body;
       if (url && typeof url === "string" && url.startsWith("/img/")) {
         const filename = path.basename(url);
-        const filePath = path.join(IMG_DIR, filename);
-        await fs.unlink(filePath).catch(() => {});
-        console.log(`[IMG] Imagem apagada do disco: ${filePath}`);
+        await fs.unlink(path.join(ROOT_IMG_DIR, filename)).catch(() => {});
+        await fs.unlink(path.join(PUBLIC_IMG_DIR, filename)).catch(() => {});
+        console.log(`[IMG] Imagem apagada do disco: ${filename}`);
       }
       res.json({ success: true });
     } catch (e) {
