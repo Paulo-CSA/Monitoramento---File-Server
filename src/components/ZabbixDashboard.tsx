@@ -1085,7 +1085,7 @@ export default function ZabbixDashboard() {
 
         <div className="grid grid-cols-3 flex-1 gap-4 overflow-hidden">
           <div className="col-span-2 bg-slate-900 border border-slate-800 rounded-lg p-5 flex flex-col shadow-lg overflow-y-auto custom-scrollbar">
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex justify-between items-center mb-3">
               <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
                 <Database className="w-4 h-4" /> Disk Partition Breakdown
               </h3>
@@ -1095,7 +1095,7 @@ export default function ZabbixDashboard() {
               </div>
             </div>
 
-            <div className="space-y-6 pr-2 mb-6">
+            <div className="space-y-3 pr-2 mb-3">
               {(metrics.drives || []).map((drive: any, idx: number) => (
                 <PartitionRow 
                   key={idx} 
@@ -1107,14 +1107,14 @@ export default function ZabbixDashboard() {
               ))}
               
               {(!metrics.drives || metrics.drives.length === 0) && (
-                <div className="text-center py-6 text-slate-600 font-mono text-[10px]">
+                <div className="text-center py-4 text-slate-600 font-mono text-[10px]">
                   Buscando unidades (C:, D:, /)...
                 </div>
               )}
             </div>
 
             {/* Quadros Proporcionais Integrados ao Card */}
-            <div className="mt-auto pt-5 border-t border-slate-800/80 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="mt-1 pt-3 border-t border-slate-800/80 grid grid-cols-1 md:grid-cols-3 gap-4">
               {/* Quadro 1: Galeria de Imagens com Upload e Deleção (Compacto - 1 Coluna) */}
               <div className="md:col-span-1 bg-slate-950/80 border border-slate-800 rounded-lg p-3.5 flex flex-col justify-between shadow-inner">
                 <div>
