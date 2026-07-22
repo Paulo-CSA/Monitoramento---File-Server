@@ -20,7 +20,11 @@ import {
   Square,
   Save,
   Plus,
-  Maximize2
+  Maximize2,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
+  ExternalLink
 } from 'lucide-react';
 import {
   AreaChart,
@@ -72,6 +76,12 @@ export default function ZabbixDashboard() {
 
   // Image Gallery & Notes State
   const [selectedFullImage, setSelectedFullImage] = useState<string | null>(null);
+  const [imageZoom, setImageZoom] = useState<number | 'fit'>('fit');
+
+  const openImageModal = (url: string) => {
+    setSelectedFullImage(url);
+    setImageZoom('fit');
+  };
   const [isEditingNote, setIsEditingNote] = useState(false);
   const [noteTextDraft, setNoteTextDraft] = useState('');
   const [newCheckitemText, setNewCheckitemText] = useState('');
@@ -325,7 +335,7 @@ export default function ZabbixDashboard() {
       img.src = event.target?.result as string;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const maxDim = 1000;
+        const maxDim = 3000;
         let width = img.width;
         let height = img.height;
         if (width > maxDim || height > maxDim) {
@@ -341,7 +351,7 @@ export default function ZabbixDashboard() {
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         ctx?.drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
 
         const newImage: ServerImage = { id: Date.now().toString(), url: dataUrl };
         const updatedServers = servers.map(s => {
@@ -1147,10 +1157,10 @@ export default function ZabbixDashboard() {
                           src={img.url} 
                           alt="Miniatura" 
                           className="max-w-full max-h-full object-contain transition-transform group-hover:scale-105"
-                          onClick={() => setSelectedFullImage(img.url)}
+                          onClick={() => openImageModal(img.url)}
                         />
                         <div 
-                          onClick={() => setSelectedFullImage(img.url)}
+                          onClick={() => openImageModal(img.url)}
                           className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
                         >
                           <Maximize2 className="w-4 h-4 text-white drop-shadow" />
@@ -1318,29 +1328,129 @@ export default function ZabbixDashboard() {
     )}
       </main>
 
-      {/* Modal Foto Tamanho Real */}
+      {/* Modal Foto Tamanho Real e Zoom Interativo */}
       <AnimatePresence>
         {selectedFullImage && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4"
+            className="fixed inset-0 z-[100] flex flex-col bg-slate-950/95 backdrop-blur-md p-4 overflow-hidden"
             onClick={() => setSelectedFullImage(null)}
           >
-            <div className="relative max-w-5xl max-h-[90vh] flex flex-col items-center" onClick={e => e.stopPropagation()}>
-              <button 
-                onClick={() => setSelectedFullImage(null)}
-                className="absolute -top-10 right-0 text-slate-400 hover:text-white bg-slate-900 border border-slate-800 p-2 rounded-full transition-colors shadow-lg"
-                title="Fechar"
-              >
-                <X className="w-5 h-5" />
-              </button>
-              <img 
-                src={selectedFullImage} 
-                alt="Imagem em tamanho real" 
-                className="max-w-full max-h-[85vh] object-contain rounded-xl border border-slate-800 shadow-2xl"
-              />
+            {/* Barra de Ferramentas de Zoom & Controle */}
+            <div 
+              className="flex justify-between items-center bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 mb-3 shadow-2xl z-20 flex-shrink-0"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-2 text-slate-200 text-xs font-bold font-mono">
+                <ImageIcon className="w-4 h-4 text-blue-400" />
+                <span>Visualizador de Imagem</span>
+                <span className="text-[10px] bg-blue-950 text-blue-300 border border-blue-800/60 px-2 py-0.5 rounded-full font-black">
+                  {imageZoom === 'fit' ? 'Ajustado' : `${imageZoom}%`}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button 
+                  onClick={() => setImageZoom('fit')}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                    imageZoom === 'fit' 
+                      ? 'bg-blue-600 text-white shadow' 
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  }`}
+                  title="Ajustar à Tela"
+                >
+                  Ajustar à Tela
+                </button>
+
+                <button 
+                  onClick={() => setImageZoom(100)}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                    imageZoom === 100 
+                      ? 'bg-blue-600 text-white shadow' 
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  }`}
+                  title="100% Tamanho Real Nativo"
+                >
+                  100% Tamanho Real
+                </button>
+
+                <div className="h-4 w-px bg-slate-800 mx-1 hidden sm:block" />
+
+                <button 
+                  onClick={() => setImageZoom(prev => typeof prev === 'number' ? Math.max(25, prev - 25) : 75)}
+                  className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors"
+                  title="Diminuir Zoom (-25%)"
+                >
+                  <ZoomOut className="w-4 h-4" />
+                </button>
+
+                <button 
+                  onClick={() => setImageZoom(prev => typeof prev === 'number' ? Math.min(500, prev + 25) : 125)}
+                  className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors"
+                  title="Aumentar Zoom (+25%)"
+                >
+                  <ZoomIn className="w-4 h-4" />
+                </button>
+
+                <button 
+                  onClick={() => setImageZoom('fit')}
+                  className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors"
+                  title="Resetar Zoom"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                </button>
+
+                <div className="h-4 w-px bg-slate-800 mx-1 hidden sm:block" />
+
+                <button 
+                  onClick={() => {
+                    const win = window.open();
+                    if (win) {
+                      win.document.write(`
+                        <html>
+                          <head><title>Visualizar Imagem em Tamanho Real</title></head>
+                          <body style="margin:0; background:#0f172a; display:flex; justify-content:center; align-items:center; min-height:100vh;">
+                            <img src="${selectedFullImage}" style="max-width:none;" />
+                          </body>
+                        </html>
+                      `);
+                    }
+                  }}
+                  className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-blue-400 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors"
+                  title="Abrir em Nova Aba"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" /> Nova Aba
+                </button>
+
+                <button 
+                  onClick={() => setSelectedFullImage(null)}
+                  className="p-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg transition-colors ml-2 shadow-lg"
+                  title="Fechar"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Area de Imagem com Rolagem e Zoom */}
+            <div 
+              className="flex-1 w-full h-full overflow-auto custom-scrollbar flex items-center justify-center p-4 bg-slate-950 rounded-xl border border-slate-800 shadow-2xl relative"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="m-auto flex justify-center items-center">
+                <img 
+                  src={selectedFullImage} 
+                  alt="Imagem em tamanho real" 
+                  style={
+                    imageZoom === 'fit' 
+                      ? { maxWidth: '100%', maxHeight: 'calc(100vh - 120px)', objectFit: 'contain' }
+                      : { width: `${imageZoom}%`, maxWidth: 'none', height: 'auto', display: 'block' }
+                  }
+                  className="rounded-lg shadow-2xl border border-slate-800/80 transition-all duration-150"
+                />
+              </div>
             </div>
           </motion.div>
         )}
