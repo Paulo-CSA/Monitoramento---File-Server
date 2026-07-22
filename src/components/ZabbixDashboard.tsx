@@ -376,48 +376,82 @@ export default function ZabbixDashboard() {
     if (!file || !activeServerId) return;
 
     setSaveStatus('saving');
-    try {
-      const formData = new FormData();
-      formData.append('image', file);
-      formData.append('serverId', activeServerId);
 
-      const uploadRes = await fetch('/api/upload-image', {
-        method: 'POST',
-        body: formData
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const dataUrl = event.target?.result as string;
+      if (!dataUrl) return;
+
+      const tempId = Date.now().toString();
+      const tempImg: ServerImage = { id: tempId, url: dataUrl };
+
+      // Atualiza o estado da aplicação imediatamente para exibir a imagem na interface
+      const updatedLocal = servers.map(s => {
+        if (s.id === activeServerId) {
+          return {
+            ...s,
+            images: [...(s.images || []), tempImg]
+          };
+        }
+        return s;
       });
+      setServers(updatedLocal);
 
-      if (!uploadRes.ok) {
-        const errorData = await uploadRes.json().catch(() => ({}));
-        throw new Error(errorData.error || "Erro ao fazer upload da imagem");
-      }
+      try {
+        // Tenta o envio via FormData/Multer
+        const formData = new FormData();
+        formData.append('image', file);
+        formData.append('serverId', activeServerId);
 
-      const uploadData = await uploadRes.json();
-      if (uploadData.servers && Array.isArray(uploadData.servers) && uploadData.servers.length > 0) {
-        setServers(uploadData.servers);
-      } else {
-        const savedUrl = uploadData.url;
-        const newImage: ServerImage = { id: uploadData.id || Date.now().toString(), url: savedUrl };
-
-        const updated = servers.map(s => {
-          if (s.id === activeServerId) {
-            return {
-              ...s,
-              images: [...(s.images || []), newImage]
-            };
-          }
-          return s;
+        let uploadRes = await fetch('/api/upload-image', {
+          method: 'POST',
+          body: formData
         });
-        setServers(updated);
-        await saveServers(updated);
+
+        // Se FormData falhar, tenta o fallback via Base64 JSON
+        if (!uploadRes.ok) {
+          uploadRes = await fetch('/api/upload-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: dataUrl, serverId: activeServerId })
+          });
+        }
+
+        if (uploadRes.ok) {
+          const uploadData = await uploadRes.json();
+          if (uploadData.servers && Array.isArray(uploadData.servers) && uploadData.servers.length > 0) {
+            setServers(uploadData.servers);
+          } else if (uploadData.url) {
+            const finalUrl = uploadData.url;
+            const updatedFinal = updatedLocal.map(s => {
+              if (s.id === activeServerId) {
+                return {
+                  ...s,
+                  images: (s.images || []).map(img => img.id === tempId ? { ...img, url: finalUrl } : img)
+                };
+              }
+              return s;
+            });
+            setServers(updatedFinal);
+            await saveServers(updatedFinal);
+          }
+        } else {
+          // Salva os servidores no banco
+          await saveServers(updatedLocal);
+        }
+
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus(null), 3000);
+      } catch (err) {
+        console.error("Erro ao processar imagem:", err);
+        await saveServers(updatedLocal);
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus(null), 3000);
       }
-      setSaveStatus('saved');
-      setTimeout(() => setSaveStatus(null), 3000);
-    } catch (err) {
-      console.error("Erro no envio da imagem:", err);
-      setSaveStatus('error');
-    } finally {
-      e.target.value = '';
-    }
+    };
+
+    reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   const handleDeleteImage = async (imageId: string) => {

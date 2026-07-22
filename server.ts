@@ -4,6 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import fs from "fs/promises";
+import fsSync from "fs";
 import multer from "multer";
 
 dotenv.config();
@@ -14,21 +15,28 @@ const DB_PATH = path.resolve(process.cwd(), "database.json");
 const ROOT_IMG_DIR = path.resolve(process.cwd(), "img");
 const PUBLIC_IMG_DIR = path.resolve(process.cwd(), "public", "img");
 
-async function ensureImgDirs() {
-  await fs.mkdir(ROOT_IMG_DIR, { recursive: true }).catch(() => {});
-  await fs.mkdir(PUBLIC_IMG_DIR, { recursive: true }).catch(() => {});
+function ensureImgDirsSync() {
+  if (!fsSync.existsSync(ROOT_IMG_DIR)) {
+    fsSync.mkdirSync(ROOT_IMG_DIR, { recursive: true });
+  }
+  if (!fsSync.existsSync(PUBLIC_IMG_DIR)) {
+    fsSync.mkdirSync(PUBLIC_IMG_DIR, { recursive: true });
+  }
 }
 
+// Garantir diretórios imediatamente na inicialização
+ensureImgDirsSync();
+
 async function saveBufferToImg(filename: string, buffer: Buffer) {
-  await ensureImgDirs();
+  ensureImgDirsSync();
   await fs.writeFile(path.join(ROOT_IMG_DIR, filename), buffer);
   await fs.writeFile(path.join(PUBLIC_IMG_DIR, filename), buffer);
 }
 
 // Configuração do Multer para upload multipart/form-data
 const storage = multer.diskStorage({
-  destination: async (req, file, cb) => {
-    await ensureImgDirs();
+  destination: (req, file, cb) => {
+    ensureImgDirsSync();
     cb(null, PUBLIC_IMG_DIR);
   },
   filename: (req, file, cb) => {
@@ -46,7 +54,7 @@ const upload = multer({
 async function processAndSaveBase64Images(servers: any[]) {
   if (!Array.isArray(servers)) return servers;
   try {
-    await ensureImgDirs();
+    ensureImgDirsSync();
     for (const server of servers) {
       if (Array.isArray(server.images)) {
         for (const img of server.images) {
@@ -98,7 +106,7 @@ async function startServer() {
   // Garante que as pastas de imagem e o database.json existem e são válidos
   const initDatabase = async () => {
     try {
-      await ensureImgDirs();
+      ensureImgDirsSync();
       console.log(`[DB] Verificando banco de dados em: ${DB_PATH}`);
       const exists = await fs.access(DB_PATH).then(() => true).catch(() => false);
       if (!exists) {
