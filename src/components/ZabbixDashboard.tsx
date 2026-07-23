@@ -78,6 +78,33 @@ const compressImageFile = (fileToCompress: File, maxWidth = 1200, quality = 0.75
   });
 };
 
+const fileToDataUrlCompressed = (fileToCompress: File, maxWidth = 1000, quality = 0.7): Promise<string> => {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(fileToCompress);
+    reader.onload = (event: any) => {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => resolve(event.target.result || '');
+    };
+    reader.onerror = () => resolve('');
+  });
+};
+
 export default function ZabbixDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -186,19 +213,10 @@ export default function ZabbixDashboard() {
   const saveServers = async (updatedServers: FileServer[]) => {
     setSaveStatus('saving');
     try {
-      // Limpa do JSON qualquer string base64 residual para evitar estouro de payload (Erro 413)
-      const sanitizedServers = updatedServers.map(server => ({
-        ...server,
-        images: (server.images || []).map(img => ({
-          ...img,
-          url: img.url.startsWith('data:image/') ? `/img/img_fallback_${img.id}.png` : img.url
-        }))
-      }));
-
       const res = await fetch('/api/servers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ servers: sanitizedServers })
+        body: JSON.stringify({ servers: updatedServers })
       });
       if (!res.ok) {
         const errText = await res.text();
@@ -419,43 +437,60 @@ export default function ZabbixDashboard() {
     setSaveStatus('saving');
 
     try {
-      // 1. Reduz e otimiza a imagem localmente usando o Canvas caso passe de 500KB
-      const fileToUpload = file.size > 500 * 1024 ? await compressImageFile(file) : file;
+      // 1. Otimiza/comprime a imagem localmente
+      const fileToUpload = file.size > 300 * 1024 ? await compressImageFile(file) : file;
 
-      // 2. Prepara o envio binário leve via FormData nativo (Elimina o fluxo Base64 problemático)
-      const formData = new FormData();
-      formData.append('image', fileToUpload);
-      formData.append('serverId', activeServerId);
+      let uploadedUrl: string | null = null;
+      let tempImageId = Date.now().toString();
 
-      const uploadRes = await fetch('/api/upload-image', {
-        method: 'POST',
-        body: formData
-      });
+      // 2. Tenta envio binário via FormData no endpoint /api/upload-image
+      try {
+        const formData = new FormData();
+        formData.append('image', fileToUpload);
+        formData.append('serverId', activeServerId);
 
-      if (!uploadRes.ok) {
-        throw new Error(`Servidor recusou o payload com status: ${uploadRes.status}`);
+        const uploadRes = await fetch('/api/upload-image', {
+          method: 'POST',
+          body: formData
+        });
+
+        if (uploadRes.ok) {
+          const uploadData = await uploadRes.json();
+          if (uploadData.servers && Array.isArray(uploadData.servers) && uploadData.servers.length > 0) {
+            setServers(uploadData.servers);
+            localStorage.setItem('zabbix_servers_backup', JSON.stringify(uploadData.servers));
+            setSaveStatus('saved');
+            setTimeout(() => setSaveStatus(null), 3000);
+            e.target.value = '';
+            return;
+          } else if (uploadData.url) {
+            uploadedUrl = uploadData.url;
+          }
+        } else {
+          console.warn(`Endpoint /api/upload-image respondeu com status ${uploadRes.status}. Usando fallback...`);
+        }
+      } catch (uploadErr) {
+        console.warn("Falha ao chamar /api/upload-image, usando fallback local...", uploadErr);
       }
 
-      const uploadData = await uploadRes.json();
+      // 3. Fallback inteligente: Se /api/upload-image deu 404 ou falhou, converte para DataURL comprimido (~50-80KB)
+      if (!uploadedUrl) {
+        uploadedUrl = await fileToDataUrlCompressed(file, 1000, 0.7);
+      }
 
-      if (uploadData.success && uploadData.url) {
-        const finalUrl = uploadData.url;
-        
-        // Atualiza o estado dos servidores injetando a URL estática retornada pelo Express
+      if (uploadedUrl) {
         const updatedFinal = servers.map(s => {
           if (s.id === activeServerId) {
             return {
               ...s,
-              images: [...(s.images || []), { id: Date.now().toString(), url: finalUrl }]
+              images: [...(s.images || []), { id: tempImageId, url: uploadedUrl }]
             };
           }
           return s;
         });
 
         setServers(updatedFinal);
-        localStorage.setItem('zabbix_servers_backup', JSON.stringify(updatedFinal));
-        setSaveStatus('saved');
-        setTimeout(() => setSaveStatus(null), 3000);
+        await saveServers(updatedFinal);
       } else {
         setSaveStatus('error');
       }
