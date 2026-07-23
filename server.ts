@@ -57,14 +57,17 @@ async function processAndSaveBase64Images(servers: any[]) {
     ensureImgDirsSync();
     for (const server of servers) {
       if (Array.isArray(server.images)) {
+        const cleanedImages = [];
         for (const img of server.images) {
-          if (img && typeof img.url === "string" && img.url.startsWith("data:image/")) {
-            const commaIndex = img.url.indexOf(",");
+          if (!img) continue;
+          let imageUrl = img.url;
+          if (typeof imageUrl === "string" && imageUrl.startsWith("data:image/")) {
+            const commaIndex = imageUrl.indexOf(",");
             if (commaIndex !== -1) {
-              const header = img.url.substring(0, commaIndex);
-              const base64Data = img.url.substring(commaIndex + 1);
+              const header = imageUrl.substring(0, commaIndex);
+              const base64Data = imageUrl.substring(commaIndex + 1);
 
-              let ext = "png";
+              let ext = "jpg";
               const mimeMatch = header.match(/data:image\/([^;]+);/);
               if (mimeMatch) {
                 const mime = mimeMatch[1].toLowerCase();
@@ -78,11 +81,18 @@ async function processAndSaveBase64Images(servers: any[]) {
               const buffer = Buffer.from(base64Data, "base64");
               const filename = `img_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
               await saveBufferToImg(filename, buffer);
-              img.url = `/img/${filename}`;
-              console.log(`[IMG] Base64 salvo em /img: ${img.url}`);
+              imageUrl = `/img/${filename}`;
+              console.log(`[IMG] Base64 convertido para arquivo: ${imageUrl}`);
             }
           }
+          if (typeof imageUrl === "string" && imageUrl.trim() !== "") {
+            cleanedImages.push({
+              id: img.id || `${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+              url: imageUrl
+            });
+          }
         }
+        server.images = cleanedImages;
       }
     }
   } catch (err) {
@@ -137,12 +147,11 @@ async function startServer() {
 
   await initDatabase();
 
-  // Upload Image Endpoint (Aceita multipart/form-data via Multer e Base64 JSON como fallback)
+  // Upload Image Endpoint (Salva imagem em disco e retorna a URL relativa /img/...)
   app.post("/api/upload-image", upload.single("image"), async (req, res) => {
     try {
       let imageUrl = "";
-      const imageId = Date.now().toString();
-      const serverId = req.body?.serverId;
+      const imageId = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 
       if (req.file) {
         // Upload via Form-Data (Multer)
@@ -156,13 +165,13 @@ async function startServer() {
         const { image } = req.body;
         if (image.startsWith("/img/")) {
           imageUrl = image;
-        } else {
+        } else if (image.startsWith("data:image/")) {
           const commaIndex = image.indexOf(",");
-          if (image.startsWith("data:image/") && commaIndex !== -1) {
+          if (commaIndex !== -1) {
             const header = image.substring(0, commaIndex);
             const base64Data = image.substring(commaIndex + 1);
 
-            let ext = "png";
+            let ext = "jpg";
             const mimeMatch = header.match(/data:image\/([^;]+);/);
             if (mimeMatch) {
               const mime = mimeMatch[1].toLowerCase();
@@ -186,35 +195,26 @@ async function startServer() {
         return res.status(400).json({ error: "Nenhuma imagem válida enviada" });
       }
 
-      // Auto-salva a imagem vinculada ao servidor no database.json se serverId for informado
-      let updatedServers: any[] = [];
-      if (serverId) {
-        try {
-          const data = await fs.readFile(DB_PATH, "utf-8");
-          const db = JSON.parse(data);
-          if (Array.isArray(db.servers)) {
-            const newImg = { id: imageId, url: imageUrl };
-            db.servers = db.servers.map((s: any) => {
-              if (s.id === serverId) {
-                const existingImages = Array.isArray(s.images) ? s.images : [];
-                return { ...s, images: [...existingImages, newImg] };
-              }
-              return s;
-            });
-            await fs.writeFile(DB_PATH, JSON.stringify(db, null, 2));
-            updatedServers = db.servers;
-            console.log(`[IMG] Imagem ${imageUrl} vinculada e salva no servidor ${serverId}`);
-          }
-        } catch (err) {
-          console.error("[IMG] Erro ao atualizar database.json para o servidor:", err);
-        }
-      }
-
-      console.log(`[IMG] Imagem disponível em: ${imageUrl}`);
-      return res.json({ success: true, url: imageUrl, id: imageId, servers: updatedServers });
+      console.log(`[IMG] Imagem salva com sucesso: ${imageUrl}`);
+      return res.json({ success: true, url: imageUrl, id: imageId });
     } catch (error: any) {
       console.error("[IMG] Erro ao salvar imagem:", error);
       return res.status(500).json({ error: error.message || "Erro interno ao salvar imagem no servidor" });
+    }
+  });
+
+  // Endpoint de Limpeza de Payload
+  app.post("/api/clean-payload", async (req, res) => {
+    try {
+      const data = await fs.readFile(DB_PATH, "utf-8");
+      let db = JSON.parse(data);
+      if (Array.isArray(db.servers)) {
+        db.servers = await processAndSaveBase64Images(db.servers);
+        await fs.writeFile(DB_PATH, JSON.stringify(db, null, 2));
+      }
+      res.json({ success: true, servers: db.servers });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Erro ao limpar payload" });
     }
   });
 
