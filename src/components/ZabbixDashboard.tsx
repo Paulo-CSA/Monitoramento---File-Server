@@ -145,6 +145,7 @@ export default function ZabbixDashboard() {
   const [isEditingServer, setIsEditingServer] = useState(false);
   const [editingServer, setEditingServer] = useState<FileServer | null>(null);
   const [editForm, setEditForm] = useState({ name: '', hostname: '', desc: '' });
+  const [serverToDelete, setServerToDelete] = useState<FileServer | null>(null);
 
   // Image Gallery & Notes State
   const [selectedFullImage, setSelectedFullImage] = useState<string | null>(null);
@@ -460,8 +461,14 @@ export default function ZabbixDashboard() {
     }
   };
 
-  const handleDeleteServer = async (id: string, e: React.MouseEvent) => {
+  const handleRequestDeleteServer = (server: FileServer, e: React.MouseEvent) => {
     e.stopPropagation();
+    setServerToDelete(server);
+  };
+
+  const confirmDeleteServer = async () => {
+    if (!serverToDelete) return;
+    const id = serverToDelete.id;
     const updated = servers.filter(s => s.id !== id);
     setServers(updated);
     await saveServers(updated);
@@ -470,6 +477,7 @@ export default function ZabbixDashboard() {
     } else if (updated.length === 0) {
       setActiveServerId(null);
     }
+    setServerToDelete(null);
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -979,7 +987,7 @@ export default function ZabbixDashboard() {
                       <Edit2 className="w-3 h-3" />
                     </button>
                     <button 
-                      onClick={(e) => handleDeleteServer(server.id, e)}
+                      onClick={(e) => handleRequestDeleteServer(server, e)}
                       className="p-1 text-slate-600 hover:text-rose-500 transition-all"
                       title="Excluir Servidor"
                     >
@@ -1160,6 +1168,55 @@ export default function ZabbixDashboard() {
                 </button>
               </div>
             </form>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Server Modal - Global Confirmation */}
+      <AnimatePresence>
+        {serverToDelete && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4"
+          >
+            <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl w-full max-w-md shadow-2xl">
+              <div className="flex items-center gap-3 text-rose-500 mb-4">
+                <div className="p-2.5 bg-rose-500/10 border border-rose-500/20 rounded-lg">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">Confirmar Remoção</h3>
+                  <p className="text-xs text-slate-400">Esta ação não poderá ser desfeita.</p>
+                </div>
+              </div>
+
+              <div className="text-sm text-slate-300 leading-relaxed mb-6 bg-slate-950 p-4 rounded-lg border border-slate-800 space-y-1">
+                <p>Tem certeza que deseja remover o servidor do painel?</p>
+                <div className="font-mono text-xs text-amber-400 pt-1">
+                  • <span className="font-bold uppercase text-white">{serverToDelete.zabbixHostname}</span> ({serverToDelete.name})
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button 
+                  type="button"
+                  onClick={() => setServerToDelete(null)}
+                  className="flex-1 py-2.5 border border-slate-800 hover:bg-slate-800 rounded-lg text-sm font-bold transition-all text-slate-300"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="button"
+                  onClick={confirmDeleteServer}
+                  className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 rounded-lg text-sm font-bold transition-all text-white shadow-lg shadow-rose-600/20 flex items-center justify-center gap-2"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Confirmar Exclusão
+                </button>
+              </div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
