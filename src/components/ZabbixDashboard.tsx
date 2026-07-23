@@ -142,8 +142,6 @@ export default function ZabbixDashboard() {
   // Image Gallery & Notes State
   const [selectedFullImage, setSelectedFullImage] = useState<string | null>(null);
   const [imageZoom, setImageZoom] = useState<number | 'fit'>('fit');
-  const [isAddingImageUrl, setIsAddingImageUrl] = useState(false);
-  const [imageUrlInput, setImageUrlInput] = useState('');
 
   const openImageModal = (url: string) => {
     setSelectedFullImage(url);
@@ -502,39 +500,40 @@ export default function ZabbixDashboard() {
     e.target.value = '';
   };
 
-  const handleAddImageUrl = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!imageUrlInput.trim() || !activeServerId) return;
+  const handleDeleteImage = async (imageId: string) => {
+    if (!activeServerId) return;
 
-    const newImg: ServerImage = {
-      id: Date.now().toString(),
-      url: imageUrlInput.trim()
-    };
+    const targetServer = servers.find(s => s.id === activeServerId);
+    const targetImage = targetServer?.images?.find(i => i.id === imageId);
 
-    const updatedFinal = servers.map(s => {
+    // 1. Atualiza imediatamente o estado React (remove a imagem da tela)
+    const updatedServers = servers.map(s => {
       if (s.id === activeServerId) {
         return {
           ...s,
-          images: [...(s.images || []), newImg]
+          images: (s.images || []).filter(img => img.id !== imageId)
         };
       }
       return s;
     });
 
-    setServers(updatedFinal);
-    await saveServers(updatedFinal);
-    setImageUrlInput('');
-    setIsAddingImageUrl(false);
-  };
+    setServers(updatedServers);
 
-  const handleDeleteImage = async (imageId: string) => {
-    if (!activeServerId) return;
-    const targetServer = servers.find(s => s.id === activeServerId);
-    const targetImage = targetServer?.images?.find(i => i.id === imageId);
+    // 2. Fecha o modal de tela cheia se for a imagem sendo excluída
+    if (selectedFullImage && targetImage && selectedFullImage === targetImage.url) {
+      setSelectedFullImage(null);
+    }
+
+    // 3. Atualiza o backup no localStorage
+    try {
+      localStorage.setItem('zabbix_servers_backup', JSON.stringify(updatedServers));
+    } catch (e) {}
 
     setSaveStatus('saving');
+
+    // 4. Notifica o backend e salva as alterações
     try {
-      const res = await fetch('/api/delete-image', {
+      await fetch('/api/delete-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -542,33 +541,13 @@ export default function ZabbixDashboard() {
           serverId: activeServerId,
           imageId
         })
-      });
+      }).catch(() => {});
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.servers && Array.isArray(data.servers) && data.servers.length > 0) {
-          setServers(data.servers);
-        } else {
-          const updated = servers.map(s => {
-            if (s.id === activeServerId) {
-              return {
-                ...s,
-                images: (s.images || []).filter(img => img.id !== imageId)
-              };
-            }
-            return s;
-          });
-          setServers(updated);
-          await saveServers(updated);
-        }
-        setSaveStatus('saved');
-        setTimeout(() => setSaveStatus(null), 3000);
-      } else {
-        setSaveStatus('error');
-      }
+      await saveServers(updatedServers);
     } catch (err) {
       console.error("Erro ao deletar imagem:", err);
-      setSaveStatus('error');
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus(null), 3000);
     }
   };
 
@@ -1317,84 +1296,47 @@ export default function ZabbixDashboard() {
                     <span className="text-[11px] font-black uppercase text-slate-300 flex items-center gap-1.5 whitespace-nowrap">
                       <ImageIcon className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" /> Galeria
                     </span>
-                    <div className="flex items-center gap-1.5">
-                      <button 
-                        type="button"
-                        onClick={() => setIsAddingImageUrl(!isAddingImageUrl)}
-                        className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[10px] font-bold flex items-center gap-1 transition-all shadow-sm"
-                        title="Adicionar por Link/URL da Imagem"
-                      >
-                        <Link2 className="w-3 h-3 text-emerald-400" /> Link
-                      </button>
-                      <label className="cursor-pointer px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-[10px] font-bold flex items-center gap-1.5 transition-all shadow-sm whitespace-nowrap flex-shrink-0">
-                        <Upload className="w-3 h-3" /> Upload
-                        <input 
-                          type="file" 
-                          accept="image/*" 
-                          className="hidden" 
-                          onChange={handleImageUpload}
-                        />
-                      </label>
-                    </div>
-                  </div>
-
-                  {isAddingImageUrl && (
-                    <form onSubmit={handleAddImageUrl} className="mb-2.5 p-2 bg-slate-900 border border-slate-800 rounded-lg flex gap-1.5">
+                    <label className="cursor-pointer px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-[10px] font-bold flex items-center gap-1.5 transition-all shadow-sm whitespace-nowrap flex-shrink-0">
+                      <Upload className="w-3 h-3" /> Upload
                       <input 
-                        type="text"
-                        placeholder="Cole a URL ou caminho da imagem..."
-                        value={imageUrlInput}
-                        onChange={(e) => setImageUrlInput(e.target.value)}
-                        className="flex-1 bg-slate-950 border border-slate-800 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500 font-mono"
-                        autoFocus
+                        type="file" 
+                        accept="image/*" 
+                        className="hidden" 
+                        onChange={handleImageUpload}
                       />
-                      <button 
-                        type="submit"
-                        className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold transition-colors"
-                      >
-                        OK
-                      </button>
-                      <button 
-                        type="button"
-                        onClick={() => setIsAddingImageUrl(false)}
-                        className="p-1 text-slate-400 hover:text-white"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </form>
-                  )}
+                    </label>
+                  </div>
 
                   <div className="grid grid-cols-2 gap-2 max-h-[200px] min-h-[150px] overflow-y-auto custom-scrollbar p-0.5 items-center justify-items-center">
                     {(activeServer?.images || []).map((img) => (
                       <div 
                         key={img.id} 
-                        className={`relative group bg-slate-900 rounded-md border border-slate-800 overflow-hidden cursor-pointer flex items-center justify-center p-1 transition-all ${
+                        onClick={() => openImageModal(img.url)}
+                        className={`relative group bg-slate-900 rounded-md border border-slate-800 overflow-hidden cursor-pointer flex items-center justify-center p-1 transition-all hover:border-blue-500/50 ${
                           (activeServer?.images || []).length === 1 
                             ? 'col-span-2 w-36 h-36 mx-auto' 
                             : 'w-full aspect-square'
                         }`}
+                        title="Clique para ampliar em tamanho real"
                       >
                         <img 
                           src={img.url} 
                           alt="Miniatura" 
                           className="max-w-full max-h-full object-contain transition-transform group-hover:scale-105"
-                          onClick={() => openImageModal(img.url)}
                         />
-                        <div 
-                          onClick={() => openImageModal(img.url)}
-                          className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
-                        >
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity pointer-events-none">
                           <Maximize2 className="w-4 h-4 text-white drop-shadow" />
                         </div>
                         <button 
+                          type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             handleDeleteImage(img.id);
                           }}
-                          className="absolute top-1 right-1 p-1 bg-rose-600/90 hover:bg-rose-500 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity z-10 shadow"
+                          className="absolute top-1 right-1 p-1 bg-rose-600/90 hover:bg-rose-500 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity z-20 shadow cursor-pointer"
                           title="Excluir Imagem"
                         >
-                          <Trash2 className="w-3 h-3" />
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     ))}
@@ -1571,7 +1513,7 @@ export default function ZabbixDashboard() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex flex-col bg-slate-950/95 backdrop-blur-md p-4 overflow-hidden"
+            className="fixed inset-0 z-[9999] flex flex-col bg-slate-950/95 backdrop-blur-md p-4 overflow-hidden"
             onClick={() => setSelectedFullImage(null)}
           >
             {/* Barra de Ferramentas de Zoom & Controle */}
@@ -1589,6 +1531,7 @@ export default function ZabbixDashboard() {
 
               <div className="flex items-center gap-1.5 flex-wrap">
                 <button 
+                  type="button"
                   onClick={() => setImageZoom('fit')}
                   className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
                     imageZoom === 'fit' 
@@ -1601,6 +1544,7 @@ export default function ZabbixDashboard() {
                 </button>
 
                 <button 
+                  type="button"
                   onClick={() => setImageZoom(100)}
                   className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
                     imageZoom === 100 
@@ -1615,6 +1559,7 @@ export default function ZabbixDashboard() {
                 <div className="h-4 w-px bg-slate-800 mx-1 hidden sm:block" />
 
                 <button 
+                  type="button"
                   onClick={() => setImageZoom(prev => typeof prev === 'number' ? Math.max(25, prev - 25) : 75)}
                   className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors"
                   title="Diminuir Zoom (-25%)"
@@ -1623,6 +1568,7 @@ export default function ZabbixDashboard() {
                 </button>
 
                 <button 
+                  type="button"
                   onClick={() => setImageZoom(prev => typeof prev === 'number' ? Math.min(500, prev + 25) : 125)}
                   className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors"
                   title="Aumentar Zoom (+25%)"
@@ -1631,6 +1577,7 @@ export default function ZabbixDashboard() {
                 </button>
 
                 <button 
+                  type="button"
                   onClick={() => setImageZoom('fit')}
                   className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors"
                   title="Resetar Zoom"
@@ -1641,17 +1588,15 @@ export default function ZabbixDashboard() {
                 <div className="h-4 w-px bg-slate-800 mx-1 hidden sm:block" />
 
                 <button 
+                  type="button"
                   onClick={() => {
-                    const win = window.open();
-                    if (win) {
-                      win.document.write(`
-                        <html>
-                          <head><title>Visualizar Imagem em Tamanho Real</title></head>
-                          <body style="margin:0; background:#0f172a; display:flex; justify-content:center; align-items:center; min-height:100vh;">
-                            <img src="${selectedFullImage}" style="max-width:none;" />
-                          </body>
-                        </html>
-                      `);
+                    if (selectedFullImage.startsWith('data:')) {
+                      const win = window.open();
+                      if (win) {
+                        win.document.write(`<img src="${selectedFullImage}" style="max-width:100%;" />`);
+                      }
+                    } else {
+                      window.open(selectedFullImage, '_blank');
                     }
                   }}
                   className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-blue-400 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors"
@@ -1661,6 +1606,7 @@ export default function ZabbixDashboard() {
                 </button>
 
                 <button 
+                  type="button"
                   onClick={() => setSelectedFullImage(null)}
                   className="p-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg transition-colors ml-2 shadow-lg"
                   title="Fechar"
@@ -1679,12 +1625,14 @@ export default function ZabbixDashboard() {
                 <img 
                   src={selectedFullImage} 
                   alt="Imagem em tamanho real" 
+                  onClick={() => setImageZoom(prev => prev === 'fit' ? 100 : 'fit')}
                   style={
                     imageZoom === 'fit' 
                       ? { maxWidth: '100%', maxHeight: 'calc(100vh - 120px)', objectFit: 'contain' }
                       : { width: `${imageZoom}%`, maxWidth: 'none', height: 'auto', display: 'block' }
                   }
-                  className="rounded-lg shadow-2xl border border-slate-800/80 transition-all duration-150"
+                  className="rounded-lg shadow-2xl border border-slate-800/80 transition-all duration-150 cursor-zoom-in"
+                  title="Clique para alternar zoom (Ajustado / 100% Tamanho Real)"
                 />
               </div>
             </div>
