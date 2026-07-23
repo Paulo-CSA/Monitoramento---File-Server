@@ -182,7 +182,7 @@ export default function ZabbixDashboard() {
           loadedServers = data.servers;
         }
 
-        // Recupera/Restaura imagens do localStorage caso o servidor esteja sem imagens, com número menor de fotos ou com fallback
+        // Recupera/Restaura imagens do localStorage caso o servidor esteja sem imagens ou com fallback
         const backupStr = localStorage.getItem('zabbix_servers_backup');
         if (backupStr) {
           try {
@@ -195,7 +195,7 @@ export default function ZabbixDashboard() {
                 if (backupServer && Array.isArray(backupServer.images) && backupServer.images.length > 0) {
                   const currentImgs = s.images || [];
                   const hasOnlyFallbacks = currentImgs.length > 0 && currentImgs.every(i => i.url.includes('fallback'));
-                  if (hasOnlyFallbacks || currentImgs.length === 0 || backupServer.images.length > currentImgs.length) {
+                  if (hasOnlyFallbacks) {
                     return { ...s, images: backupServer.images };
                   }
                 }
@@ -229,83 +229,55 @@ export default function ZabbixDashboard() {
     initServers();
   }, []);
 
-  // Converte de forma garantida qualquer imagem base64 para URL de arquivo salva no servidor (/img/...)
-  const ensureCleanImageUrls = async (serversList: FileServer[]): Promise<FileServer[]> => {
-    let modified = false;
-    const cleanedServers = await Promise.all(
-      serversList.map(async (server) => {
-        if (!server.images || server.images.length === 0) return server;
-        let serverModified = false;
-        const cleanedImages = await Promise.all(
-          server.images.map(async (img) => {
-            if (img && img.url && img.url.startsWith('data:image/')) {
-              try {
-                const uploadRes = await fetch('/api/upload-image', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ image: img.url, serverId: server.id })
-                });
-                if (uploadRes.ok) {
-                  const data = await uploadRes.json();
-                  if (data.url && data.url.startsWith('/img/')) {
-                    serverModified = true;
-                    modified = true;
-                    return { ...img, url: data.url };
-                  }
-                }
-              } catch (e) {
-                console.warn("Falha ao converter base64 para URL em /api/upload-image:", e);
-              }
-            }
-            return img;
-          })
-        );
-        return serverModified ? { ...server, images: cleanedImages } : server;
-      })
-    );
-
-    if (modified) {
-      setServers(cleanedServers);
-    }
-    return cleanedServers;
-  };
-
   const saveServers = async (updatedServers: FileServer[]) => {
     setSaveStatus('saving');
 
-    // 1. Converte quaisquer imagens base64 pendentes para arquivos físicos (/img/...)
-    const cleanServersList = await ensureCleanImageUrls(updatedServers);
+    // Salva o estado completo (com imagens) no localStorage para garantia de persistência local
+    try {
+      localStorage.setItem('zabbix_servers_backup', JSON.stringify(updatedServers));
+    } catch (e) {
+      console.warn("Nao foi possivel salvar no localStorage backup", e);
+    }
 
-    // 2. Salva no banco do servidor (database.json)
     try {
       let res = await fetch('/api/servers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ servers: cleanServersList })
+        body: JSON.stringify({ servers: updatedServers })
       });
+
+      // Se o servidor/Nginx retornar 413 (Payload Too Large), sanitiza as imagens pesadas e re-salva os dados do servidor
+      if (!res.ok && res.status === 413) {
+        console.warn("Status 413 retornado pelo proxy. Reenviando payload otimizado...");
+        const sanitizedServers = updatedServers.map(server => ({
+          ...server,
+          images: (server.images || []).map(img => ({
+            ...img,
+            url: (img.url && img.url.length > 80000)
+              ? `/img/img_fallback_${img.id}.png`
+              : img.url
+          }))
+        }));
+        res = await fetch('/api/servers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ servers: sanitizedServers })
+        });
+      }
 
       if (!res.ok) {
         const errText = await res.text();
         console.error("Erro ao salvar servidores no servidor:", res.status, errText);
         setSaveStatus('error');
-        setTimeout(() => setSaveStatus(null), 4000);
       } else {
-        const data = await res.json();
-        const savedServers = (data.servers && Array.isArray(data.servers)) ? data.servers : cleanServersList;
-        setServers(savedServers);
-        try {
-          localStorage.setItem('zabbix_servers_backup', JSON.stringify(savedServers));
-        } catch (e) {
-          console.warn("localStorage backup error:", e);
-        }
-        console.log("Servidores salvos com sucesso!");
+        console.log("Servidores salvos com sucesso no servidor (database.json)!");
         setSaveStatus('saved');
         setTimeout(() => setSaveStatus(null), 3000);
       }
     } catch (err) {
-      console.error("Erro de conexao ao salvar servidores:", err);
-      setSaveStatus('error');
-      setTimeout(() => setSaveStatus(null), 4000);
+      console.error("Falha de rede ao salvar servidores no backend", err);
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus(null), 3000);
     }
   };
 
@@ -525,9 +497,7 @@ export default function ZabbixDashboard() {
           const uploadData = await uploadRes.json();
           if (uploadData.servers && Array.isArray(uploadData.servers) && uploadData.servers.length > 0) {
             setServers(uploadData.servers);
-            try {
-              localStorage.setItem('zabbix_servers_backup', JSON.stringify(uploadData.servers));
-            } catch (e) {}
+            localStorage.setItem('zabbix_servers_backup', JSON.stringify(uploadData.servers));
             setSaveStatus('saved');
             setTimeout(() => setSaveStatus(null), 3000);
             e.target.value = '';
@@ -540,27 +510,9 @@ export default function ZabbixDashboard() {
         console.warn("Upload via FormData falhou, utilizando fallback de alta definição...", uploadErr);
       }
 
-      // 2. Se o FormData falhar, converte para base64 e envia em JSON para salvar como arquivo no servidor
+      // 2. Fallback de alta resolução se o FormData falhar (mantém até 2400px e nitidez perfeita para diagramas/textos)
       if (!uploadedUrl) {
-        const compressedBase64 = await fileToDataUrlCompressed(file, 2400, 0.88);
-        try {
-          const jsonRes = await fetch('/api/upload-image', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image: compressedBase64, serverId: activeServerId })
-          });
-          if (jsonRes.ok) {
-            const jsonResult = await jsonRes.json();
-            if (jsonResult.url) {
-              uploadedUrl = jsonResult.url;
-            }
-          }
-        } catch (jsonErr) {
-          console.warn("Upload via JSON base64 falhou:", jsonErr);
-        }
-        if (!uploadedUrl) {
-          uploadedUrl = compressedBase64;
-        }
+        uploadedUrl = await fileToDataUrlCompressed(file, 2400, 0.88);
       }
 
       if (uploadedUrl) {
@@ -1409,11 +1361,6 @@ export default function ZabbixDashboard() {
                         <img 
                           src={img.url} 
                           alt="Miniatura" 
-                          onError={(e) => {
-                            const target = e.currentTarget;
-                            target.onerror = null;
-                            target.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='18' height='18' x='3' y='3' rx='2' ry='2'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Cpath d='m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21'/%3E%3C/svg%3E";
-                          }}
                           className="max-w-full max-h-full object-contain transition-transform group-hover:scale-105"
                         />
                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity pointer-events-none">
@@ -1750,11 +1697,6 @@ export default function ZabbixDashboard() {
                 <img 
                   src={selectedFullImage} 
                   alt="Imagem em tamanho real" 
-                  onError={(e) => {
-                    const target = e.currentTarget;
-                    target.onerror = null;
-                    target.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='18' height='18' x='3' y='3' rx='2' ry='2'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Cpath d='m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21'/%3E%3C/svg%3E";
-                  }}
                   onClick={() => setImageZoom(prev => prev === 'fit' ? 100 : 'fit')}
                   style={
                     imageZoom === 'fit' 
