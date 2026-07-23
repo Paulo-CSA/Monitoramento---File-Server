@@ -96,8 +96,8 @@ async function startServer() {
   
   const PORT = 3000;
 
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  app.use(express.json({ limit: "100mb" }));
+  app.use(express.urlencoded({ limit: "100mb", extended: true }));
 
   // Serve static files from both /public/img and /img directories
   app.use("/img", express.static(PUBLIC_IMG_DIR));
@@ -138,7 +138,14 @@ async function startServer() {
   await initDatabase();
 
   // Upload Image Endpoint (Aceita multipart/form-data via Multer e Base64 JSON como fallback)
-  app.post("/api/upload-image", upload.single("image"), async (req, res) => {
+  app.post("/api/upload-image", (req, res, next) => {
+    upload.single("image")(req, res, (err) => {
+      if (err) {
+        console.warn("[IMG] Aviso no processamento Multer (prosseguindo para fallback):", err.message);
+      }
+      next();
+    });
+  }, async (req, res) => {
     try {
       let imageUrl = "";
       const imageId = Date.now().toString();
@@ -278,7 +285,7 @@ async function startServer() {
       servers = await processAndSaveBase64Images(servers);
       await fs.writeFile(DB_PATH, JSON.stringify({ servers }, null, 2));
       console.log(`Saved ${servers.length} servers to database.json`);
-      res.json({ success: true });
+      res.json({ success: true, servers });
     } catch (error) {
       console.error("Failed to save to database:", error);
       res.status(500).json({ error: "Failed to save to database" });
