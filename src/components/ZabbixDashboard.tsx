@@ -229,39 +229,55 @@ export default function ZabbixDashboard() {
     initServers();
   }, []);
 
+  // Função para sanitizar o payload de servidores garantindo que nenhuma imagem em base64 infle o JSON enviado ao backend
+  const cleanServersPayload = (serverList: FileServer[]): FileServer[] => {
+    if (!Array.isArray(serverList)) return [];
+    return serverList.map(s => ({
+      ...s,
+      images: (s.images || []).map(img => {
+        // Se por qualquer razão a imagem ainda for um string base64 longo, substitui por URL relativa limpa
+        if (img && typeof img.url === 'string' && img.url.startsWith('data:image/')) {
+          return {
+            ...img,
+            url: `/img/img_fallback_${img.id || Date.now()}.png`
+          };
+        }
+        return img;
+      })
+    }));
+  };
+
   const saveServers = async (updatedServers: FileServer[]) => {
     setSaveStatus('saving');
 
-    // Salva o estado completo (com imagens) no localStorage para garantia de persistência local
+    // 1. Sanitizar o estado do JSON para garantir que nenhuma imagem em base64 seja enviada no POST /api/servers
+    const cleanServers = cleanServersPayload(updatedServers);
+
+    // 2. Salva o estado limpo no localStorage para garantia de persistência local sem estourar cota
     try {
-      localStorage.setItem('zabbix_servers_backup', JSON.stringify(updatedServers));
+      localStorage.setItem('zabbix_servers_backup', JSON.stringify(cleanServers));
     } catch (e) {
-      console.warn("Nao foi possivel salvar no localStorage backup", e);
+      console.warn("Não foi possível salvar no localStorage backup", e);
     }
 
     try {
       let res = await fetch('/api/servers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ servers: updatedServers })
+        body: JSON.stringify({ servers: cleanServers })
       });
 
-      // Se o servidor/Nginx retornar 413 (Payload Too Large), sanitiza as imagens pesadas e re-salva os dados do servidor
+      // Se o servidor/Nginx retornar 413 (Payload Too Large), sanitiza extra e re-envia
       if (!res.ok && res.status === 413) {
-        console.warn("Status 413 retornado pelo proxy. Reenviando payload otimizado...");
-        const sanitizedServers = updatedServers.map(server => ({
+        console.warn("Status 413 (Payload Too Large) retornado. Forçando reenvio de payload ultraleve...");
+        const ultraClean = cleanServers.map(server => ({
           ...server,
-          images: (server.images || []).map(img => ({
-            ...img,
-            url: (img.url && img.url.length > 80000)
-              ? `/img/img_fallback_${img.id}.png`
-              : img.url
-          }))
+          images: (server.images || []).filter(img => img.url && !img.url.startsWith('data:'))
         }));
         res = await fetch('/api/servers', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ servers: sanitizedServers })
+          body: JSON.stringify({ servers: ultraClean })
         });
       }
 
@@ -276,8 +292,7 @@ export default function ZabbixDashboard() {
       }
     } catch (err) {
       console.error("Falha de rede ao salvar servidores no backend", err);
-      setSaveStatus('saved');
-      setTimeout(() => setSaveStatus(null), 3000);
+      setSaveStatus('error');
     }
   };
 
@@ -473,16 +488,22 @@ export default function ZabbixDashboard() {
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !activeServerId) return;
+    const filesList = e.target.files;
+    if (!filesList || filesList.length === 0 || !activeServerId) return;
 
+    const files: File[] = Array.from(filesList);
     setSaveStatus('saving');
 
-    try {
-      let uploadedUrl: string | null = null;
-      const tempImageId = Date.now().toString();
+    let currentServers = [...servers];
 
-      // 1. Tenta upload do arquivo original via /api/upload-image (100% qualidade original sem perda)
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      let savedUrl: string | null = null;
+      const tempImageId = `img_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+      console.log(`[UPLOAD ${i+1}/${files.length}] Enviando foto: ${file.name}...`);
+
+      // 1. Envia a foto via FormData (multipart) para o backend salvar diretamente no disco /img/
       try {
         const formData = new FormData();
         formData.append('image', file);
@@ -496,46 +517,72 @@ export default function ZabbixDashboard() {
         if (uploadRes.ok) {
           const uploadData = await uploadRes.json();
           if (uploadData.servers && Array.isArray(uploadData.servers) && uploadData.servers.length > 0) {
-            setServers(uploadData.servers);
-            localStorage.setItem('zabbix_servers_backup', JSON.stringify(uploadData.servers));
-            setSaveStatus('saved');
-            setTimeout(() => setSaveStatus(null), 3000);
-            e.target.value = '';
-            return;
+            currentServers = cleanServersPayload(uploadData.servers);
+            setServers(currentServers);
+            savedUrl = uploadData.url;
           } else if (uploadData.url) {
-            uploadedUrl = uploadData.url;
+            savedUrl = uploadData.url;
           }
         }
       } catch (uploadErr) {
-        console.warn("Upload via FormData falhou, utilizando fallback de alta definição...", uploadErr);
+        console.warn(`[UPLOAD ${i+1}] Fallback de upload para ${file.name}:`, uploadErr);
       }
 
-      // 2. Fallback de alta resolução se o FormData falhar (mantém até 2400px e nitidez perfeita para diagramas/textos)
-      if (!uploadedUrl) {
-        uploadedUrl = await fileToDataUrlCompressed(file, 2400, 0.88);
-      }
+      // 2. Se o upload via FormData falhou, envia base64 ISOLADO para o endpoint /api/upload-image para salvar no disco e retornar URL /img/
+      if (!savedUrl) {
+        try {
+          const base64Data = await fileToDataUrlCompressed(file, 2000, 0.85);
+          if (base64Data && base64Data.startsWith('data:image/')) {
+            const base64Res = await fetch('/api/upload-image', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ image: base64Data, serverId: activeServerId })
+            });
 
-      if (uploadedUrl) {
-        const updatedFinal = servers.map(s => {
-          if (s.id === activeServerId) {
-            return {
-              ...s,
-              images: [...(s.images || []), { id: tempImageId, url: uploadedUrl! }]
-            };
+            if (base64Res.ok) {
+              const bData = await base64Res.json();
+              if (bData.servers && Array.isArray(bData.servers) && bData.servers.length > 0) {
+                currentServers = cleanServersPayload(bData.servers);
+                setServers(currentServers);
+                savedUrl = bData.url;
+              } else if (bData.url) {
+                savedUrl = bData.url;
+              }
+            }
           }
-          return s;
-        });
-
-        setServers(updatedFinal);
-        await saveServers(updatedFinal);
-      } else {
-        setSaveStatus('error');
+        } catch (e) {
+          console.error(`[UPLOAD ${i+1}] Erro no fallback base64:`, e);
+        }
       }
-    } catch (err) {
-      console.error("Erro ao processar imagem:", err);
-      setSaveStatus('error');
+
+      // 3. Atualiza a lista local com a URL relativa salva no disco
+      if (savedUrl && !savedUrl.startsWith('data:image/')) {
+        const alreadyExists = currentServers.some(s =>
+          s.id === activeServerId && s.images?.some(img => img.url === savedUrl)
+        );
+
+        if (!alreadyExists) {
+          currentServers = currentServers.map(s => {
+            if (s.id === activeServerId) {
+              return {
+                ...s,
+                images: [...(s.images || []), { id: tempImageId, url: savedUrl! }]
+              };
+            }
+            return s;
+          });
+          currentServers = cleanServersPayload(currentServers);
+          setServers(currentServers);
+        }
+      }
+
+      // 4. Salva e Limpa: persiste o estado limpo e leve, liberando a memória antes da próxima foto
+      await saveServers(currentServers);
+      console.log(`[UPLOAD ${i+1}/${files.length}] Foto salva e payload limpo com sucesso!`);
     }
 
+    setSaveStatus('saved');
+    setTimeout(() => setSaveStatus(null), 3000);
     e.target.value = '';
   };
 
@@ -1340,6 +1387,7 @@ export default function ZabbixDashboard() {
                       <input 
                         type="file" 
                         accept="image/*" 
+                        multiple
                         className="hidden" 
                         onChange={handleImageUpload}
                       />
@@ -1388,6 +1436,7 @@ export default function ZabbixDashboard() {
                         <input 
                           type="file" 
                           accept="image/*" 
+                          multiple
                           className="hidden" 
                           onChange={handleImageUpload}
                         />
