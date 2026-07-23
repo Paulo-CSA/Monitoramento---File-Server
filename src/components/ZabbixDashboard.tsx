@@ -78,7 +78,7 @@ const compressImageFile = (fileToCompress: File, maxWidth = 1200, quality = 0.75
   });
 };
 
-const fileToDataUrlCompressed = (fileToCompress: File, maxWidth = 1000, quality = 0.7): Promise<string> => {
+const fileToDataUrlCompressed = (fileToCompress: File, maxWidth = 800, quality = 0.6): Promise<string> => {
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.readAsDataURL(fileToCompress);
@@ -212,12 +212,49 @@ export default function ZabbixDashboard() {
 
   const saveServers = async (updatedServers: FileServer[]) => {
     setSaveStatus('saving');
+
+    // Salva o estado completo (incluindo imagens locais) no localStorage para persistência do usuário
     try {
-      const res = await fetch('/api/servers', {
+      localStorage.setItem('zabbix_servers_backup', JSON.stringify(updatedServers));
+    } catch (e) {
+      console.warn("Nao foi possivel salvar no localStorage backup", e);
+    }
+
+    // Sanitiza strings Base64 do payload para o backend para evitar Erro 413 (Payload Too Large) no Nginx/Servidor
+    const sanitizedServers = updatedServers.map(server => ({
+      ...server,
+      images: (server.images || []).map(img => ({
+        ...img,
+        url: (img.url && img.url.startsWith('data:image/'))
+          ? `/img/img_fallback_${img.id}.png`
+          : img.url
+      }))
+    }));
+
+    try {
+      let res = await fetch('/api/servers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ servers: updatedServers })
+        body: JSON.stringify({ servers: sanitizedServers })
       });
+
+      // Se mesmo assim retornar 413, tenta payload ultra-sanitizado sem imagens pesadas
+      if (!res.ok && res.status === 413) {
+        console.warn("Status 413 retornado pelo proxy/servidor. Reenviando payload ultra-limpo...");
+        const ultraCleanServers = updatedServers.map(server => ({
+          ...server,
+          images: (server.images || []).map(img => ({
+            id: img.id,
+            url: `/img/img_fallback_${img.id}.png`
+          }))
+        }));
+        res = await fetch('/api/servers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ servers: ultraCleanServers })
+        });
+      }
+
       if (!res.ok) {
         const errText = await res.text();
         console.error("Erro ao salvar servidores no servidor:", res.status, errText);
@@ -230,12 +267,6 @@ export default function ZabbixDashboard() {
     } catch (err) {
       console.error("Falha de rede ao salvar servidores no backend", err);
       setSaveStatus('error');
-    }
-
-    try {
-      localStorage.setItem('zabbix_servers_backup', JSON.stringify(updatedServers));
-    } catch (e) {
-      console.warn("Nao foi possivel salvar no localStorage backup", e);
     }
   };
 
