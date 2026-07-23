@@ -229,41 +229,67 @@ export default function ZabbixDashboard() {
     initServers();
   }, []);
 
+  // Converte de forma garantida qualquer imagem base64 para URL de arquivo salva no servidor (/img/...)
+  const ensureCleanImageUrls = async (serversList: FileServer[]): Promise<FileServer[]> => {
+    let modified = false;
+    const cleanedServers = await Promise.all(
+      serversList.map(async (server) => {
+        if (!server.images || server.images.length === 0) return server;
+        let serverModified = false;
+        const cleanedImages = await Promise.all(
+          server.images.map(async (img) => {
+            if (img && img.url && img.url.startsWith('data:image/')) {
+              try {
+                const uploadRes = await fetch('/api/upload-image', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ image: img.url, serverId: server.id })
+                });
+                if (uploadRes.ok) {
+                  const data = await uploadRes.json();
+                  if (data.url && data.url.startsWith('/img/')) {
+                    serverModified = true;
+                    modified = true;
+                    return { ...img, url: data.url };
+                  }
+                }
+              } catch (e) {
+                console.warn("Falha ao converter base64 para URL em /api/upload-image:", e);
+              }
+            }
+            return img;
+          })
+        );
+        return serverModified ? { ...server, images: cleanedImages } : server;
+      })
+    );
+
+    if (modified) {
+      setServers(cleanedServers);
+    }
+    return cleanedServers;
+  };
+
   const saveServers = async (updatedServers: FileServer[]) => {
     setSaveStatus('saving');
 
-    // Salva o estado completo (com imagens) no localStorage para garantia de persistência local
+    // 1. Sanitiza e converte qualquer imagem base64 em URL de arquivo no servidor (/img/...)
+    const cleanServersList = await ensureCleanImageUrls(updatedServers);
+
+    // 2. Salva o backup no localStorage com URLs de arquivo leves
     try {
-      localStorage.setItem('zabbix_servers_backup', JSON.stringify(updatedServers));
+      localStorage.setItem('zabbix_servers_backup', JSON.stringify(cleanServersList));
     } catch (e) {
       console.warn("Nao foi possivel salvar no localStorage backup", e);
     }
 
+    // 3. Salva os servidores no banco de dados do servidor (database.json)
     try {
       let res = await fetch('/api/servers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ servers: updatedServers })
+        body: JSON.stringify({ servers: cleanServersList })
       });
-
-      // Se o servidor/Nginx retornar 413 (Payload Too Large), sanitiza as imagens pesadas e re-salva os dados do servidor
-      if (!res.ok && res.status === 413) {
-        console.warn("Status 413 retornado pelo proxy. Reenviando payload otimizado...");
-        const sanitizedServers = updatedServers.map(server => ({
-          ...server,
-          images: (server.images || []).map(img => ({
-            ...img,
-            url: (img.url && img.url.length > 80000)
-              ? `/img/img_fallback_${img.id}.png`
-              : img.url
-          }))
-        }));
-        res = await fetch('/api/servers', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ servers: sanitizedServers })
-        });
-      }
 
       if (!res.ok) {
         const errText = await res.text();
@@ -510,9 +536,27 @@ export default function ZabbixDashboard() {
         console.warn("Upload via FormData falhou, utilizando fallback de alta definição...", uploadErr);
       }
 
-      // 2. Fallback de alta resolução se o FormData falhar (mantém até 2400px e nitidez perfeita para diagramas/textos)
+      // 2. Se o FormData falhar, converte para base64 e envia em JSON para salvar como arquivo no servidor
       if (!uploadedUrl) {
-        uploadedUrl = await fileToDataUrlCompressed(file, 2400, 0.88);
+        const compressedBase64 = await fileToDataUrlCompressed(file, 2400, 0.88);
+        try {
+          const jsonRes = await fetch('/api/upload-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: compressedBase64, serverId: activeServerId })
+          });
+          if (jsonRes.ok) {
+            const jsonResult = await jsonRes.json();
+            if (jsonResult.url) {
+              uploadedUrl = jsonResult.url;
+            }
+          }
+        } catch (jsonErr) {
+          console.warn("Upload via JSON base64 falhou:", jsonErr);
+        }
+        if (!uploadedUrl) {
+          uploadedUrl = compressedBase64;
+        }
       }
 
       if (uploadedUrl) {
