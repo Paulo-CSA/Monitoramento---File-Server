@@ -24,8 +24,7 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCcw,
-  ExternalLink,
-  Link2
+  ExternalLink
 } from 'lucide-react';
 import {
   AreaChart,
@@ -48,7 +47,7 @@ import { ZabbixItem, ZabbixHost, FileServer, ServerImage, ServerNoteItem } from 
 const COLORS = ['#10b981', '#f59e0b', '#ef4444', '#3b82f6'];
 
 // Função utilitária para comprimir imagens no navegador antes do upload
-const compressImageFile = (fileToCompress: File, maxWidth = 1200, quality = 0.75): Promise<File> => {
+const compressImageFile = (fileToCompress: File, maxWidth = 2000, quality = 0.85): Promise<File> => {
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.readAsDataURL(fileToCompress);
@@ -66,7 +65,11 @@ const compressImageFile = (fileToCompress: File, maxWidth = 1200, quality = 0.75
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
-        if (ctx) ctx.drawImage(img, 0, 0, width, height);
+        if (ctx) {
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(img, 0, 0, width, height);
+        }
         canvas.toBlob((blob) => {
           if (blob) {
             resolve(new File([blob], fileToCompress.name.replace(/\.[^/.]+$/, ".jpg"), { type: 'image/jpeg' }));
@@ -79,7 +82,7 @@ const compressImageFile = (fileToCompress: File, maxWidth = 1200, quality = 0.75
   });
 };
 
-const fileToDataUrlCompressed = (fileToCompress: File, maxWidth = 600, quality = 0.5): Promise<string> => {
+const fileToDataUrlCompressed = (fileToCompress: File, maxWidth = 2400, quality = 0.88): Promise<string> => {
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.readAsDataURL(fileToCompress);
@@ -102,7 +105,11 @@ const fileToDataUrlCompressed = (fileToCompress: File, maxWidth = 600, quality =
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
-        if (ctx) ctx.drawImage(img, 0, 0, width, height);
+        if (ctx) {
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(img, 0, 0, width, height);
+        }
         resolve(canvas.toDataURL('image/jpeg', quality));
       };
       img.onerror = () => resolve(event.target.result || '');
@@ -187,7 +194,7 @@ export default function ZabbixDashboard() {
                 const backupServer = backup.find(b => b.id === s.id);
                 if (backupServer && Array.isArray(backupServer.images) && backupServer.images.length > 0) {
                   const currentImgs = s.images || [];
-                  const hasOnlyFallbacks = currentImgs.length === 0 || currentImgs.every(i => i.url.includes('fallback'));
+                  const hasOnlyFallbacks = currentImgs.length > 0 && currentImgs.every(i => i.url.includes('fallback'));
                   if (hasOnlyFallbacks) {
                     return { ...s, images: backupServer.images };
                   }
@@ -472,16 +479,48 @@ export default function ZabbixDashboard() {
     setSaveStatus('saving');
 
     try {
-      // Otimização ultra leve via Canvas HTML5 (~15KB-25KB)
-      const compressedDataUrl = await fileToDataUrlCompressed(file, 600, 0.5);
+      let uploadedUrl: string | null = null;
       const tempImageId = Date.now().toString();
 
-      if (compressedDataUrl) {
+      // 1. Tenta upload do arquivo original via /api/upload-image (100% qualidade original sem perda)
+      try {
+        const formData = new FormData();
+        formData.append('image', file);
+        formData.append('serverId', activeServerId);
+
+        const uploadRes = await fetch('/api/upload-image', {
+          method: 'POST',
+          body: formData
+        });
+
+        if (uploadRes.ok) {
+          const uploadData = await uploadRes.json();
+          if (uploadData.servers && Array.isArray(uploadData.servers) && uploadData.servers.length > 0) {
+            setServers(uploadData.servers);
+            localStorage.setItem('zabbix_servers_backup', JSON.stringify(uploadData.servers));
+            setSaveStatus('saved');
+            setTimeout(() => setSaveStatus(null), 3000);
+            e.target.value = '';
+            return;
+          } else if (uploadData.url) {
+            uploadedUrl = uploadData.url;
+          }
+        }
+      } catch (uploadErr) {
+        console.warn("Upload via FormData falhou, utilizando fallback de alta definição...", uploadErr);
+      }
+
+      // 2. Fallback de alta resolução se o FormData falhar (mantém até 2400px e nitidez perfeita para diagramas/textos)
+      if (!uploadedUrl) {
+        uploadedUrl = await fileToDataUrlCompressed(file, 2400, 0.88);
+      }
+
+      if (uploadedUrl) {
         const updatedFinal = servers.map(s => {
           if (s.id === activeServerId) {
             return {
               ...s,
-              images: [...(s.images || []), { id: tempImageId, url: compressedDataUrl }]
+              images: [...(s.images || []), { id: tempImageId, url: uploadedUrl! }]
             };
           }
           return s;
@@ -1551,9 +1590,35 @@ export default function ZabbixDashboard() {
                       ? 'bg-blue-600 text-white shadow' 
                       : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                   }`}
-                  title="100% Tamanho Real Nativo"
+                  title="Exibir 100% no Tamanho Real Nativo Sem Perda"
                 >
                   100% Tamanho Real
+                </button>
+
+                <button 
+                  type="button"
+                  onClick={() => setImageZoom(150)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                    imageZoom === 150 
+                      ? 'bg-blue-600 text-white shadow' 
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  }`}
+                  title="Ampliar 150%"
+                >
+                  150%
+                </button>
+
+                <button 
+                  type="button"
+                  onClick={() => setImageZoom(200)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                    imageZoom === 200 
+                      ? 'bg-blue-600 text-white shadow' 
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  }`}
+                  title="Ampliar 200%"
+                >
+                  200%
                 </button>
 
                 <div className="h-4 w-px bg-slate-800 mx-1 hidden sm:block" />
@@ -1593,14 +1658,21 @@ export default function ZabbixDashboard() {
                     if (selectedFullImage.startsWith('data:')) {
                       const win = window.open();
                       if (win) {
-                        win.document.write(`<img src="${selectedFullImage}" style="max-width:100%;" />`);
+                        win.document.write(`
+                          <html>
+                            <head><title>Imagem em Tamanho Real</title></head>
+                            <body style="margin:0; background:#020617; display:flex; justify-content:center; align-items:center; min-height:100vh;">
+                              <img src="${selectedFullImage}" style="max-width:none;" />
+                            </body>
+                          </html>
+                        `);
                       }
                     } else {
                       window.open(selectedFullImage, '_blank');
                     }
                   }}
                   className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-blue-400 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors"
-                  title="Abrir em Nova Aba"
+                  title="Abrir Imagem Original em Nova Aba"
                 >
                   <ExternalLink className="w-3.5 h-3.5" /> Nova Aba
                 </button>
@@ -1616,23 +1688,27 @@ export default function ZabbixDashboard() {
               </div>
             </div>
 
-            {/* Area de Imagem com Rolagem e Zoom */}
+            {/* Area de Imagem com Rolagem 2D e Tamanho Real Sem Restricoes */}
             <div 
-              className="flex-1 w-full h-full overflow-auto custom-scrollbar flex items-center justify-center p-4 bg-slate-950 rounded-xl border border-slate-800 shadow-2xl relative"
+              className="flex-1 w-full h-full overflow-auto custom-scrollbar p-4 bg-slate-950/90 rounded-xl border border-slate-800 shadow-2xl relative"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="m-auto flex justify-center items-center">
+              <div className="min-w-full min-h-full flex items-center justify-center p-2 m-auto">
                 <img 
                   src={selectedFullImage} 
                   alt="Imagem em tamanho real" 
                   onClick={() => setImageZoom(prev => prev === 'fit' ? 100 : 'fit')}
                   style={
                     imageZoom === 'fit' 
-                      ? { maxWidth: '100%', maxHeight: 'calc(100vh - 120px)', objectFit: 'contain' }
-                      : { width: `${imageZoom}%`, maxWidth: 'none', height: 'auto', display: 'block' }
+                      ? { maxWidth: '100%', maxHeight: 'calc(100vh - 150px)', objectFit: 'contain' }
+                      : imageZoom === 100
+                      ? { maxWidth: 'none', maxHeight: 'none', width: 'auto', height: 'auto', display: 'block' }
+                      : { maxWidth: 'none', maxHeight: 'none', width: `${imageZoom}%`, height: 'auto', display: 'block' }
                   }
-                  className="rounded-lg shadow-2xl border border-slate-800/80 transition-all duration-150 cursor-zoom-in"
-                  title="Clique para alternar zoom (Ajustado / 100% Tamanho Real)"
+                  className={`rounded-lg shadow-2xl border border-slate-800/80 transition-all duration-150 ${
+                    imageZoom === 'fit' ? 'cursor-zoom-in' : 'cursor-zoom-out'
+                  }`}
+                  title={imageZoom === 'fit' ? "Clique para alternar para 100% Tamanho Real" : "Clique para Ajustar à Tela"}
                 />
               </div>
             </div>
