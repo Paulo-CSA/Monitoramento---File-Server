@@ -278,7 +278,7 @@ async function startServer() {
       servers = await processAndSaveBase64Images(servers);
       await fs.writeFile(DB_PATH, JSON.stringify({ servers }, null, 2));
       console.log(`Saved ${servers.length} servers to database.json`);
-      res.json({ success: true });
+      res.json({ success: true, servers });
     } catch (error) {
       console.error("Failed to save to database:", error);
       res.status(500).json({ error: "Failed to save to database" });
