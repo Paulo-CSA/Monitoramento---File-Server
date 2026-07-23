@@ -229,22 +229,6 @@ export default function ZabbixDashboard() {
     initServers();
   }, []);
 
-  // Função de sanitização estrita para garantir que o payload JSON nunca exceda o limite (413 Payload Too Large) nem estoure o localStorage (5MB)
-  const cleanServersForStorage = (serversList: FileServer[]): FileServer[] => {
-    return serversList.map(server => ({
-      ...server,
-      images: (server.images || []).map(img => {
-        if (img && img.url && img.url.startsWith('data:image/') && img.url.length > 500) {
-          return {
-            ...img,
-            url: `/img/img_${img.id || Date.now()}.jpg`
-          };
-        }
-        return img;
-      })
-    }));
-  };
-
   // Converte de forma garantida qualquer imagem base64 para URL de arquivo salva no servidor (/img/...)
   const ensureCleanImageUrls = async (serversList: FileServer[]): Promise<FileServer[]> => {
     let modified = false;
@@ -292,26 +276,12 @@ export default function ZabbixDashboard() {
     // 1. Converte quaisquer imagens base64 pendentes para arquivos físicos (/img/...)
     const cleanServersList = await ensureCleanImageUrls(updatedServers);
 
-    // 2. Sanitiza o payload garantindo 0% de base64 no JSON para evitar estouro de limite
-    const sanitizedPayload = cleanServersForStorage(cleanServersList);
-
-    // 3. Salva no localStorage com proteção contra cota máxima de 5MB
-    try {
-      localStorage.setItem('zabbix_servers_backup', JSON.stringify(sanitizedPayload));
-    } catch (e) {
-      console.warn("localStorage cheio, limpando backup antigo...", e);
-      try {
-        localStorage.removeItem('zabbix_servers_backup');
-        localStorage.setItem('zabbix_servers_backup', JSON.stringify(sanitizedPayload));
-      } catch (e2) {}
-    }
-
-    // 4. Salva no banco do servidor (database.json)
+    // 2. Salva no banco do servidor (database.json)
     try {
       let res = await fetch('/api/servers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ servers: sanitizedPayload })
+        body: JSON.stringify({ servers: cleanServersList })
       });
 
       if (!res.ok) {
@@ -321,17 +291,21 @@ export default function ZabbixDashboard() {
         setTimeout(() => setSaveStatus(null), 4000);
       } else {
         const data = await res.json();
-        if (data.servers && Array.isArray(data.servers)) {
-          setServers(data.servers);
+        const savedServers = (data.servers && Array.isArray(data.servers)) ? data.servers : cleanServersList;
+        setServers(savedServers);
+        try {
+          localStorage.setItem('zabbix_servers_backup', JSON.stringify(savedServers));
+        } catch (e) {
+          console.warn("localStorage backup error:", e);
         }
         console.log("Servidores salvos com sucesso!");
         setSaveStatus('saved');
         setTimeout(() => setSaveStatus(null), 3000);
       }
     } catch (err) {
-      console.error("Falha de rede ao salvar servidores no backend", err);
-      setSaveStatus('saved');
-      setTimeout(() => setSaveStatus(null), 3000);
+      console.error("Erro de conexao ao salvar servidores:", err);
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus(null), 4000);
     }
   };
 
@@ -552,7 +526,7 @@ export default function ZabbixDashboard() {
           if (uploadData.servers && Array.isArray(uploadData.servers) && uploadData.servers.length > 0) {
             setServers(uploadData.servers);
             try {
-              localStorage.setItem('zabbix_servers_backup', JSON.stringify(cleanServersForStorage(uploadData.servers)));
+              localStorage.setItem('zabbix_servers_backup', JSON.stringify(uploadData.servers));
             } catch (e) {}
             setSaveStatus('saved');
             setTimeout(() => setSaveStatus(null), 3000);
