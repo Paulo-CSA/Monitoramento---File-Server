@@ -182,7 +182,7 @@ export default function ZabbixDashboard() {
           loadedServers = data.servers;
         }
 
-        // Recupera/Restaura imagens do localStorage caso o servidor esteja sem imagens ou com fallback
+        // Recupera/Restaura imagens do localStorage caso o servidor esteja sem imagens, com número menor de fotos ou com fallback
         const backupStr = localStorage.getItem('zabbix_servers_backup');
         if (backupStr) {
           try {
@@ -195,7 +195,7 @@ export default function ZabbixDashboard() {
                 if (backupServer && Array.isArray(backupServer.images) && backupServer.images.length > 0) {
                   const currentImgs = s.images || [];
                   const hasOnlyFallbacks = currentImgs.length > 0 && currentImgs.every(i => i.url.includes('fallback'));
-                  if (hasOnlyFallbacks) {
+                  if (hasOnlyFallbacks || currentImgs.length === 0 || backupServer.images.length > currentImgs.length) {
                     return { ...s, images: backupServer.images };
                   }
                 }
@@ -1409,6 +1409,11 @@ export default function ZabbixDashboard() {
                         <img 
                           src={img.url} 
                           alt="Miniatura" 
+                          onError={(e) => {
+                            const target = e.currentTarget;
+                            target.onerror = null;
+                            target.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='18' height='18' x='3' y='3' rx='2' ry='2'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Cpath d='m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21'/%3E%3C/svg%3E";
+                          }}
                           className="max-w-full max-h-full object-contain transition-transform group-hover:scale-105"
                         />
                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity pointer-events-none">
@@ -1745,6 +1750,11 @@ export default function ZabbixDashboard() {
                 <img 
                   src={selectedFullImage} 
                   alt="Imagem em tamanho real" 
+                  onError={(e) => {
+                    const target = e.currentTarget;
+                    target.onerror = null;
+                    target.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='18' height='18' x='3' y='3' rx='2' ry='2'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Cpath d='m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21'/%3E%3C/svg%3E";
+                  }}
                   onClick={() => setImageZoom(prev => prev === 'fit' ? 100 : 'fit')}
                   style={
                     imageZoom === 'fit' 
