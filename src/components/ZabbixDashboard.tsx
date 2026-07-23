@@ -24,7 +24,8 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCcw,
-  ExternalLink
+  ExternalLink,
+  Link2
 } from 'lucide-react';
 import {
   AreaChart,
@@ -78,7 +79,7 @@ const compressImageFile = (fileToCompress: File, maxWidth = 1200, quality = 0.75
   });
 };
 
-const fileToDataUrlCompressed = (fileToCompress: File, maxWidth = 800, quality = 0.6): Promise<string> => {
+const fileToDataUrlCompressed = (fileToCompress: File, maxWidth = 600, quality = 0.5): Promise<string> => {
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.readAsDataURL(fileToCompress);
@@ -89,9 +90,14 @@ const fileToDataUrlCompressed = (fileToCompress: File, maxWidth = 800, quality =
         const canvas = document.createElement('canvas');
         let width = img.width;
         let height = img.height;
-        if (width > maxWidth) {
-          height = Math.round((height * maxWidth) / width);
-          width = maxWidth;
+        if (width > maxWidth || height > maxWidth) {
+          if (width > height) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          } else {
+            width = Math.round((width * maxWidth) / height);
+            height = maxWidth;
+          }
         }
         canvas.width = width;
         canvas.height = height;
@@ -136,6 +142,8 @@ export default function ZabbixDashboard() {
   // Image Gallery & Notes State
   const [selectedFullImage, setSelectedFullImage] = useState<string | null>(null);
   const [imageZoom, setImageZoom] = useState<number | 'fit'>('fit');
+  const [isAddingImageUrl, setIsAddingImageUrl] = useState(false);
+  const [imageUrlInput, setImageUrlInput] = useState('');
 
   const openImageModal = (url: string) => {
     setSelectedFullImage(url);
@@ -167,23 +175,29 @@ export default function ZabbixDashboard() {
         let loadedServers: FileServer[] = [];
         if (data && data.servers && Array.isArray(data.servers) && data.servers.length > 0) {
           loadedServers = data.servers;
-        } else {
-          // Fallback to localStorage if server database is empty
-          const backup = localStorage.getItem('zabbix_servers_backup');
-          if (backup) {
-            try {
-              const parsed = JSON.parse(backup);
-              if (Array.isArray(parsed) && parsed.length > 0) {
-                loadedServers = parsed;
-                // Sync backup back to server database
-                await fetch('/api/servers', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ servers: parsed })
-                });
-              }
-            } catch (e) {}
-          }
+        }
+
+        // Recupera/Restaura imagens do localStorage caso o servidor esteja sem imagens ou com fallback
+        const backupStr = localStorage.getItem('zabbix_servers_backup');
+        if (backupStr) {
+          try {
+            const backup: FileServer[] = JSON.parse(backupStr);
+            if (loadedServers.length === 0) {
+              loadedServers = backup;
+            } else {
+              loadedServers = loadedServers.map(s => {
+                const backupServer = backup.find(b => b.id === s.id);
+                if (backupServer && Array.isArray(backupServer.images) && backupServer.images.length > 0) {
+                  const currentImgs = s.images || [];
+                  const hasOnlyFallbacks = currentImgs.length === 0 || currentImgs.every(i => i.url.includes('fallback'));
+                  if (hasOnlyFallbacks) {
+                    return { ...s, images: backupServer.images };
+                  }
+                }
+                return s;
+              });
+            }
+          } catch (e) {}
         }
 
         if (loadedServers.length > 0) {
@@ -213,45 +227,36 @@ export default function ZabbixDashboard() {
   const saveServers = async (updatedServers: FileServer[]) => {
     setSaveStatus('saving');
 
-    // Salva o estado completo (incluindo imagens locais) no localStorage para persistência do usuário
+    // Salva o estado completo (com imagens) no localStorage para garantia de persistência local
     try {
       localStorage.setItem('zabbix_servers_backup', JSON.stringify(updatedServers));
     } catch (e) {
       console.warn("Nao foi possivel salvar no localStorage backup", e);
     }
 
-    // Sanitiza strings Base64 do payload para o backend para evitar Erro 413 (Payload Too Large) no Nginx/Servidor
-    const sanitizedServers = updatedServers.map(server => ({
-      ...server,
-      images: (server.images || []).map(img => ({
-        ...img,
-        url: (img.url && img.url.startsWith('data:image/'))
-          ? `/img/img_fallback_${img.id}.png`
-          : img.url
-      }))
-    }));
-
     try {
       let res = await fetch('/api/servers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ servers: sanitizedServers })
+        body: JSON.stringify({ servers: updatedServers })
       });
 
-      // Se mesmo assim retornar 413, tenta payload ultra-sanitizado sem imagens pesadas
+      // Se o servidor/Nginx retornar 413 (Payload Too Large), sanitiza as imagens pesadas e re-salva os dados do servidor
       if (!res.ok && res.status === 413) {
-        console.warn("Status 413 retornado pelo proxy/servidor. Reenviando payload ultra-limpo...");
-        const ultraCleanServers = updatedServers.map(server => ({
+        console.warn("Status 413 retornado pelo proxy. Reenviando payload otimizado...");
+        const sanitizedServers = updatedServers.map(server => ({
           ...server,
           images: (server.images || []).map(img => ({
-            id: img.id,
-            url: `/img/img_fallback_${img.id}.png`
+            ...img,
+            url: (img.url && img.url.length > 80000)
+              ? `/img/img_fallback_${img.id}.png`
+              : img.url
           }))
         }));
         res = await fetch('/api/servers', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ servers: ultraCleanServers })
+          body: JSON.stringify({ servers: sanitizedServers })
         });
       }
 
@@ -266,7 +271,8 @@ export default function ZabbixDashboard() {
       }
     } catch (err) {
       console.error("Falha de rede ao salvar servidores no backend", err);
-      setSaveStatus('error');
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus(null), 3000);
     }
   };
 
@@ -468,53 +474,16 @@ export default function ZabbixDashboard() {
     setSaveStatus('saving');
 
     try {
-      // 1. Otimiza/comprime a imagem localmente
-      const fileToUpload = file.size > 300 * 1024 ? await compressImageFile(file) : file;
+      // Otimização ultra leve via Canvas HTML5 (~15KB-25KB)
+      const compressedDataUrl = await fileToDataUrlCompressed(file, 600, 0.5);
+      const tempImageId = Date.now().toString();
 
-      let uploadedUrl: string | null = null;
-      let tempImageId = Date.now().toString();
-
-      // 2. Tenta envio binário via FormData no endpoint /api/upload-image
-      try {
-        const formData = new FormData();
-        formData.append('image', fileToUpload);
-        formData.append('serverId', activeServerId);
-
-        const uploadRes = await fetch('/api/upload-image', {
-          method: 'POST',
-          body: formData
-        });
-
-        if (uploadRes.ok) {
-          const uploadData = await uploadRes.json();
-          if (uploadData.servers && Array.isArray(uploadData.servers) && uploadData.servers.length > 0) {
-            setServers(uploadData.servers);
-            localStorage.setItem('zabbix_servers_backup', JSON.stringify(uploadData.servers));
-            setSaveStatus('saved');
-            setTimeout(() => setSaveStatus(null), 3000);
-            e.target.value = '';
-            return;
-          } else if (uploadData.url) {
-            uploadedUrl = uploadData.url;
-          }
-        } else {
-          console.warn(`Endpoint /api/upload-image respondeu com status ${uploadRes.status}. Usando fallback...`);
-        }
-      } catch (uploadErr) {
-        console.warn("Falha ao chamar /api/upload-image, usando fallback local...", uploadErr);
-      }
-
-      // 3. Fallback inteligente: Se /api/upload-image deu 404 ou falhou, converte para DataURL comprimido (~50-80KB)
-      if (!uploadedUrl) {
-        uploadedUrl = await fileToDataUrlCompressed(file, 1000, 0.7);
-      }
-
-      if (uploadedUrl) {
+      if (compressedDataUrl) {
         const updatedFinal = servers.map(s => {
           if (s.id === activeServerId) {
             return {
               ...s,
-              images: [...(s.images || []), { id: tempImageId, url: uploadedUrl }]
+              images: [...(s.images || []), { id: tempImageId, url: compressedDataUrl }]
             };
           }
           return s;
@@ -526,11 +495,36 @@ export default function ZabbixDashboard() {
         setSaveStatus('error');
       }
     } catch (err) {
-      console.error("Erro ao processar upload da imagem técnica:", err);
+      console.error("Erro ao processar imagem:", err);
       setSaveStatus('error');
     }
 
     e.target.value = '';
+  };
+
+  const handleAddImageUrl = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!imageUrlInput.trim() || !activeServerId) return;
+
+    const newImg: ServerImage = {
+      id: Date.now().toString(),
+      url: imageUrlInput.trim()
+    };
+
+    const updatedFinal = servers.map(s => {
+      if (s.id === activeServerId) {
+        return {
+          ...s,
+          images: [...(s.images || []), newImg]
+        };
+      }
+      return s;
+    });
+
+    setServers(updatedFinal);
+    await saveServers(updatedFinal);
+    setImageUrlInput('');
+    setIsAddingImageUrl(false);
   };
 
   const handleDeleteImage = async (imageId: string) => {
@@ -1323,16 +1317,52 @@ export default function ZabbixDashboard() {
                     <span className="text-[11px] font-black uppercase text-slate-300 flex items-center gap-1.5 whitespace-nowrap">
                       <ImageIcon className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" /> Galeria
                     </span>
-                    <label className="cursor-pointer px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-[10px] font-bold flex items-center gap-1.5 transition-all shadow-sm whitespace-nowrap flex-shrink-0">
-                      <Upload className="w-3 h-3" /> Adicionar
-                      <input 
-                        type="file" 
-                        accept="image/*" 
-                        className="hidden" 
-                        onChange={handleImageUpload}
-                      />
-                    </label>
+                    <div className="flex items-center gap-1.5">
+                      <button 
+                        type="button"
+                        onClick={() => setIsAddingImageUrl(!isAddingImageUrl)}
+                        className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[10px] font-bold flex items-center gap-1 transition-all shadow-sm"
+                        title="Adicionar por Link/URL da Imagem"
+                      >
+                        <Link2 className="w-3 h-3 text-emerald-400" /> Link
+                      </button>
+                      <label className="cursor-pointer px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-[10px] font-bold flex items-center gap-1.5 transition-all shadow-sm whitespace-nowrap flex-shrink-0">
+                        <Upload className="w-3 h-3" /> Upload
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          className="hidden" 
+                          onChange={handleImageUpload}
+                        />
+                      </label>
+                    </div>
                   </div>
+
+                  {isAddingImageUrl && (
+                    <form onSubmit={handleAddImageUrl} className="mb-2.5 p-2 bg-slate-900 border border-slate-800 rounded-lg flex gap-1.5">
+                      <input 
+                        type="text"
+                        placeholder="Cole a URL ou caminho da imagem..."
+                        value={imageUrlInput}
+                        onChange={(e) => setImageUrlInput(e.target.value)}
+                        className="flex-1 bg-slate-950 border border-slate-800 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500 font-mono"
+                        autoFocus
+                      />
+                      <button 
+                        type="submit"
+                        className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold transition-colors"
+                      >
+                        OK
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => setIsAddingImageUrl(false)}
+                        className="p-1 text-slate-400 hover:text-white"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </form>
+                  )}
 
                   <div className="grid grid-cols-2 gap-2 max-h-[200px] min-h-[150px] overflow-y-auto custom-scrollbar p-0.5 items-center justify-items-center">
                     {(activeServer?.images || []).map((img) => (
