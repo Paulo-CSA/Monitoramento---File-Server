@@ -58,13 +58,13 @@ async function processAndSaveBase64Images(servers: any[]) {
     for (const server of servers) {
       if (Array.isArray(server.images)) {
         for (const img of server.images) {
-          if (img && typeof img.url === "string" && img.url.startsWith("data:image/")) {
+          if (img && typeof img.url === "string" && (img.url.startsWith("data:image/") || img.url.length > 500)) {
             const commaIndex = img.url.indexOf(",");
             if (commaIndex !== -1) {
               const header = img.url.substring(0, commaIndex);
               const base64Data = img.url.substring(commaIndex + 1);
 
-              let ext = "png";
+              let ext = "jpg";
               const mimeMatch = header.match(/data:image\/([^;]+);/);
               if (mimeMatch) {
                 const mime = mimeMatch[1].toLowerCase();
@@ -79,7 +79,7 @@ async function processAndSaveBase64Images(servers: any[]) {
               const filename = `img_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
               await saveBufferToImg(filename, buffer);
               img.url = `/img/${filename}`;
-              console.log(`[IMG] Base64 salvo em /img: ${img.url}`);
+              console.log(`[IMG] Base64 convertido e salvo em disco: ${img.url}`);
             }
           }
         }
@@ -96,8 +96,8 @@ async function startServer() {
   
   const PORT = 3000;
 
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  app.use(express.json({ limit: "100mb" }));
+  app.use(express.urlencoded({ limit: "100mb", extended: true }));
 
   // Serve static files from both /public/img and /img directories
   app.use("/img", express.static(PUBLIC_IMG_DIR));
@@ -137,8 +137,15 @@ async function startServer() {
 
   await initDatabase();
 
-  // Upload Image Endpoint (Aceita multipart/form-data via Multer e Base64 JSON como fallback)
-  app.post("/api/upload-image", upload.single("image"), async (req, res) => {
+  // Middleware flexível para Multer no endpoint de upload de imagens
+  app.post("/api/upload-image", (req, res, next) => {
+    upload.single("image")(req, res, (err) => {
+      if (err) {
+        console.warn("[MULTER WARN] Upload multipart não pôde ser processado diretamente via file:", err.message);
+      }
+      next();
+    });
+  }, async (req, res) => {
     try {
       let imageUrl = "";
       const imageId = Date.now().toString();
@@ -158,11 +165,11 @@ async function startServer() {
           imageUrl = image;
         } else {
           const commaIndex = image.indexOf(",");
-          if (image.startsWith("data:image/") && commaIndex !== -1) {
+          if (commaIndex !== -1) {
             const header = image.substring(0, commaIndex);
             const base64Data = image.substring(commaIndex + 1);
 
-            let ext = "png";
+            let ext = "jpg";
             const mimeMatch = header.match(/data:image\/([^;]+);/);
             if (mimeMatch) {
               const mime = mimeMatch[1].toLowerCase();
@@ -201,6 +208,7 @@ async function startServer() {
               }
               return s;
             });
+            db.servers = await processAndSaveBase64Images(db.servers);
             await fs.writeFile(DB_PATH, JSON.stringify(db, null, 2));
             updatedServers = db.servers;
             console.log(`[IMG] Imagem ${imageUrl} vinculada e salva no servidor ${serverId}`);

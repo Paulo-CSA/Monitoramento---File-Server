@@ -46,43 +46,8 @@ import { ZabbixItem, ZabbixHost, FileServer, ServerImage, ServerNoteItem } from 
 
 const COLORS = ['#10b981', '#f59e0b', '#ef4444', '#3b82f6'];
 
-// Função utilitária para comprimir imagens no navegador antes do upload
-const compressImageFile = (fileToCompress: File, maxWidth = 2000, quality = 0.85): Promise<File> => {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(fileToCompress);
-    reader.onload = (event: any) => {
-      const img = new Image();
-      img.src = event.target.result;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let width = img.width;
-        let height = img.height;
-        if (width > maxWidth) {
-          height = Math.round((height * maxWidth) / width);
-          width = maxWidth;
-        }
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = 'high';
-          ctx.drawImage(img, 0, 0, width, height);
-        }
-        canvas.toBlob((blob) => {
-          if (blob) {
-            resolve(new File([blob], fileToCompress.name.replace(/\.[^/.]+$/, ".jpg"), { type: 'image/jpeg' }));
-          } else {
-            resolve(fileToCompress);
-          }
-        }, 'image/jpeg', quality);
-      };
-    };
-  });
-};
-
-const fileToDataUrlCompressed = (fileToCompress: File, maxWidth = 2400, quality = 0.88): Promise<string> => {
+// Função utilitária para comprimir imagens no navegador para um Blob leve (~150KB-250KB) antes do upload
+const compressImageToBlob = (fileToCompress: File, maxWidth = 2000, quality = 0.85): Promise<Blob> => {
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.readAsDataURL(fileToCompress);
@@ -110,12 +75,33 @@ const fileToDataUrlCompressed = (fileToCompress: File, maxWidth = 2400, quality 
           ctx.imageSmoothingQuality = 'high';
           ctx.drawImage(img, 0, 0, width, height);
         }
-        resolve(canvas.toDataURL('image/jpeg', quality));
+        canvas.toBlob((blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            resolve(fileToCompress);
+          }
+        }, 'image/jpeg', quality);
       };
-      img.onerror = () => resolve(event.target.result || '');
+      img.onerror = () => resolve(fileToCompress);
     };
-    reader.onerror = () => resolve('');
+    reader.onerror = () => resolve(fileToCompress);
   });
+};
+
+const saveLocalBackup = (serverList: FileServer[]) => {
+  try {
+    const sanitized = serverList.map(s => ({
+      ...s,
+      images: (s.images || []).map(img => ({
+        ...img,
+        url: (img.url && img.url.length > 500) ? `/img/fallback_${img.id}.jpg` : img.url
+      }))
+    }));
+    localStorage.setItem('zabbix_servers_backup', JSON.stringify(sanitized));
+  } catch (e) {
+    console.warn("Nao foi possivel salvar no localStorage backup", e);
+  }
 };
 
 export default function ZabbixDashboard() {
@@ -232,12 +218,8 @@ export default function ZabbixDashboard() {
   const saveServers = async (updatedServers: FileServer[]) => {
     setSaveStatus('saving');
 
-    // Salva o estado completo (com imagens) no localStorage para garantia de persistência local
-    try {
-      localStorage.setItem('zabbix_servers_backup', JSON.stringify(updatedServers));
-    } catch (e) {
-      console.warn("Nao foi possivel salvar no localStorage backup", e);
-    }
+    // Salva o estado otimizado no localStorage de forma totalmente segura sem travar
+    saveLocalBackup(updatedServers);
 
     try {
       let res = await fetch('/api/servers', {
@@ -246,30 +228,16 @@ export default function ZabbixDashboard() {
         body: JSON.stringify({ servers: updatedServers })
       });
 
-      // Se o servidor/Nginx retornar 413 (Payload Too Large), sanitiza as imagens pesadas e re-salva os dados do servidor
-      if (!res.ok && res.status === 413) {
-        console.warn("Status 413 retornado pelo proxy. Reenviando payload otimizado...");
-        const sanitizedServers = updatedServers.map(server => ({
-          ...server,
-          images: (server.images || []).map(img => ({
-            ...img,
-            url: (img.url && img.url.length > 80000)
-              ? `/img/img_fallback_${img.id}.png`
-              : img.url
-          }))
-        }));
-        res = await fetch('/api/servers', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ servers: sanitizedServers })
-        });
-      }
-
       if (!res.ok) {
         const errText = await res.text();
         console.error("Erro ao salvar servidores no servidor:", res.status, errText);
         setSaveStatus('error');
       } else {
+        const data = await res.json();
+        if (data && data.servers) {
+          setServers(data.servers);
+          saveLocalBackup(data.servers);
+        }
         console.log("Servidores salvos com sucesso no servidor (database.json)!");
         setSaveStatus('saved');
         setTimeout(() => setSaveStatus(null), 3000);
@@ -479,60 +447,73 @@ export default function ZabbixDashboard() {
     setSaveStatus('saving');
 
     try {
-      let uploadedUrl: string | null = null;
-      const tempImageId = Date.now().toString();
+      // 1. Comprime a imagem no navegador para um Blob leve (~150KB-250KB) mantendo excelente resolução
+      const compressedBlob = await compressImageToBlob(file, 2000, 0.85);
 
-      // 1. Tenta upload do arquivo original via /api/upload-image (100% qualidade original sem perda)
-      try {
-        const formData = new FormData();
-        formData.append('image', file);
-        formData.append('serverId', activeServerId);
+      // 2. Prepara FormData para streaming multipart seguro sem estourar limites
+      const formData = new FormData();
+      formData.append('image', compressedBlob, file.name.replace(/\.[^/.]+$/, ".jpg"));
+      formData.append('serverId', activeServerId);
 
-        const uploadRes = await fetch('/api/upload-image', {
+      const uploadRes = await fetch('/api/upload-image', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (uploadRes.ok) {
+        const uploadData = await uploadRes.json();
+        if (uploadData.servers && Array.isArray(uploadData.servers) && uploadData.servers.length > 0) {
+          setServers(uploadData.servers);
+          saveLocalBackup(uploadData.servers);
+          setSaveStatus('saved');
+          setTimeout(() => setSaveStatus(null), 3000);
+          e.target.value = '';
+          return;
+        } else if (uploadData.url) {
+          const newImg = { id: uploadData.id || Date.now().toString(), url: uploadData.url };
+          const updatedServers = servers.map(s => {
+            if (s.id === activeServerId) {
+              return { ...s, images: [...(s.images || []), newImg] };
+            }
+            return s;
+          });
+          setServers(updatedServers);
+          await saveServers(updatedServers);
+          e.target.value = '';
+          return;
+        }
+      }
+
+      // 3. Fallback: se o streaming via FormData falhar, envia o Base64 do Blob comprimido para o servidor salvar diretamente em arquivo no disco
+      const base64String = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(compressedBlob);
+        reader.onload = (ev: any) => resolve(ev.target.result || '');
+        reader.onerror = () => resolve('');
+      });
+
+      if (base64String) {
+        const fallbackRes = await fetch('/api/upload-image', {
           method: 'POST',
-          body: formData
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: base64String, serverId: activeServerId })
         });
-
-        if (uploadRes.ok) {
-          const uploadData = await uploadRes.json();
-          if (uploadData.servers && Array.isArray(uploadData.servers) && uploadData.servers.length > 0) {
-            setServers(uploadData.servers);
-            localStorage.setItem('zabbix_servers_backup', JSON.stringify(uploadData.servers));
+        if (fallbackRes.ok) {
+          const fallbackData = await fallbackRes.json();
+          if (fallbackData.servers && Array.isArray(fallbackData.servers)) {
+            setServers(fallbackData.servers);
+            saveLocalBackup(fallbackData.servers);
             setSaveStatus('saved');
             setTimeout(() => setSaveStatus(null), 3000);
             e.target.value = '';
             return;
-          } else if (uploadData.url) {
-            uploadedUrl = uploadData.url;
           }
         }
-      } catch (uploadErr) {
-        console.warn("Upload via FormData falhou, utilizando fallback de alta definição...", uploadErr);
       }
 
-      // 2. Fallback de alta resolução se o FormData falhar (mantém até 2400px e nitidez perfeita para diagramas/textos)
-      if (!uploadedUrl) {
-        uploadedUrl = await fileToDataUrlCompressed(file, 2400, 0.88);
-      }
-
-      if (uploadedUrl) {
-        const updatedFinal = servers.map(s => {
-          if (s.id === activeServerId) {
-            return {
-              ...s,
-              images: [...(s.images || []), { id: tempImageId, url: uploadedUrl! }]
-            };
-          }
-          return s;
-        });
-
-        setServers(updatedFinal);
-        await saveServers(updatedFinal);
-      } else {
-        setSaveStatus('error');
-      }
+      setSaveStatus('error');
     } catch (err) {
-      console.error("Erro ao processar imagem:", err);
+      console.error("Erro no envio da imagem:", err);
       setSaveStatus('error');
     }
 
@@ -564,9 +545,7 @@ export default function ZabbixDashboard() {
     }
 
     // 3. Atualiza o backup no localStorage
-    try {
-      localStorage.setItem('zabbix_servers_backup', JSON.stringify(updatedServers));
-    } catch (e) {}
+    saveLocalBackup(updatedServers);
 
     setSaveStatus('saving');
 
